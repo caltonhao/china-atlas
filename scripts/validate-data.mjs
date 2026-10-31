@@ -17,7 +17,7 @@ expect(surnames.unavailable.map((item) => item.short).join(",") === "香港,澳�
 expect(ethnicities.provinces.map((item) => item.short).join(",") === provinces.join(","), "两份数据的省份列表应一致");
 expect(surnames.meta.label.includes("示意"), "姓氏数据应标注示意");
 expect(ethnicities.meta.label.includes("示意"), "民族数据应标注示意");
-expect(surnames.surnames.length === 100, `姓氏应为 100 个，实际 ${surnames.surnames.length}`);
+expect(surnames.surnames.length === 400, `姓氏应为 400 个，实际 ${surnames.surnames.length}`);
 
 const seen = new Set();
 for (const item of surnames.surnames) {
@@ -53,11 +53,14 @@ expect(share("马", "宁夏") > share("马", "浙江") * 2, "马应在宁夏更�
 expect(share("金", "吉林") > share("金", "浙江"), "金应在吉林高于浙江");
 expect(share("杨", "四川") > share("杨", "北京"), "杨应在四川更高");
 expect(share("黄", "广东") > share("黄", "山东") * 2, "黄应集中于广东");
+expect(share("欧阳", "江西") > share("欧阳", "山东"), "欧阳应集中于江西");
+expect(share("朴", "吉林") > share("朴", "河南"), "朴应在吉林更高");
+expect(share("区", "广东") > share("区", "山东"), "区应集中于广东");
 expect(columnSum("西藏") < columnSum("山东") * 0.5, "西藏常见姓合计应更低");
 expect(columnSum("新疆") < columnSum("江苏"), "新疆常见姓合计应低于江苏");
 for (const province of provinces) {
   const sum = columnSum(province);
-  expect(sum > 8 && sum < 96, `${province} 姓氏合计 ${sum.toFixed(2)} 异常`);
+  expect(sum > 8 && sum < 98, `${province} 姓氏合计 ${sum.toFixed(2)} 异常`);
 }
 
 expect(ethnicities.groups.length >= 40, "主要民族覆盖不足");
@@ -93,6 +96,33 @@ expect(ethnic("满族", "辽宁") > 8, "满族应在辽宁较高");
 expect(ethnic("蒙古族", "内蒙古") > 15, "蒙古族应在内蒙古较高");
 expect(ethnic("汉族", "山西") > 98, "山西汉族比例应很高");
 expect(ethnicities.groups.find((item) => item.name === "汉族").nationalShare > 88, "汉族全国参照应为主导");
+
+for (const province of provinces) {
+  const file = JSON.parse(readFileSync(join(root, `public/data/cities/${province}.json`), "utf8"));
+  expect(file.province === province, `${province} 地级文件省份不符`);
+  expect(file.cities.length >= 5, `${province} 地级单位过少`);
+  expect(file.meta.label.includes("示意"), `${province} 地级数据应标注示意`);
+  for (const [surname, row] of Object.entries(file.surnameShares)) {
+    expect(row.length === file.cities.length, `${province} ${surname} 地级份额长度不符`);
+    expect(row.every((value) => typeof value === "number" && value >= 0), `${province} ${surname} 地级份额无效`);
+  }
+  for (const [city, groups] of Object.entries(file.ethnicity)) {
+    expect(file.cities.includes(city), `${province} 有未知城市 ${city}`);
+    const sum = Object.values(groups).reduce((total, value) => total + value, 0);
+    expect(Math.abs(sum - 100) < 0.2, `${city} 民族合计 ${sum}`);
+  }
+}
+
+const guangdong = JSON.parse(readFileSync(join(root, "public/data/cities/广东.json"), "utf8"));
+const chaozhou = guangdong.cities.indexOf("潮州市");
+const shaoguan = guangdong.cities.indexOf("韶关市");
+expect(guangdong.surnameShares["林"][chaozhou] > guangdong.surnameShares["林"][shaoguan], "潮州的林应高于韶关");
+const jilin = JSON.parse(readFileSync(join(root, "public/data/cities/吉林.json"), "utf8"));
+expect(jilin.ethnicity["延边朝鲜族自治州"]["朝鲜族"] > 25, "延边朝鲜族应明显更高");
+const xinjiang = JSON.parse(readFileSync(join(root, "public/data/cities/新疆.json"), "utf8"));
+expect(xinjiang.ethnicity["喀什地区"]["维吾尔族"] > 80, "喀什维吾尔族应很高");
+const hainan = JSON.parse(readFileSync(join(root, "public/data/cities/海南.json"), "utf8"));
+expect(hainan.ethnicity["白沙黎族自治县"]["黎族"] > 40, "白沙黎族应很高");
 
 if (failures.length) {
   console.error(failures.join("\n"));

@@ -258,6 +258,25 @@ input[type="search"]::-webkit-search-cancel-button { appearance: none; }
 
 .map-toolbar h2 { font-size: 22px; }
 
+.crumb {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin: 0 0 2px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+#back-nation {
+  border: 1px solid var(--line);
+  background: #fffdf9;
+  border-radius: 999px;
+  min-height: 32px;
+  padding: 0 12px;
+  color: var(--indigo);
+}
+
 .map-toolbar p, .legend p { margin: 0; font-size: 13px; }
 
 .chart {

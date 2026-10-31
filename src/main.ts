@@ -1,20 +1,29 @@
 import "./style.css";
 import { legendGradient, mountMap, type AtlasMap } from "./map";
 import {
+  type CityFile,
   type Mode,
+  ADCODE,
+  cityHasLocalEthnicity,
   entryOf,
   esc,
   ethnicComposition,
+  ethnicCompositionAt,
   formatPct,
   fullName,
+  isFlatSpread,
   isUnavailable,
+  loadCityFile,
   modeLabel,
   provinceBlurb,
+  rankCities,
   rankProvinces,
   resolveQuery,
   suggestionsFor,
   topSurnames,
+  topSurnamesAt,
   trackedSurnameTotal,
+  trackedSurnameTotalAt,
   unavailableNote,
 } from "./model";
 import { ethnicColor } from "./palette";
@@ -26,7 +35,10 @@ const state: {
   mode: Mode;
   query: string;
   via: string;
-  selected: string | null;
+  province: string | null;
+  city: string | null;
+  level: "nation" | "province";
+  cityPack: CityFile | null;
   suggestIndex: number;
   suggestOpen: boolean;
   rankExpanded: boolean;
@@ -36,13 +48,18 @@ const state: {
   mode: "surname",
   query: "",
   via: "",
-  selected: null,
+  province: null,
+  city: null,
+  level: "nation",
+  cityPack: null,
   suggestIndex: 0,
   suggestOpen: false,
   rankExpanded: false,
   error: "",
   booted: false,
 };
+
+let drillToken = 0;
 
 let composing = false;
 let atlas: AtlasMap | null = null;
@@ -55,7 +72,7 @@ app.innerHTML = `
       <div>
         <p class="eyebrow">省级分布 · 示意/整理数据</p>
         <h1>中国姓氏与民族图鉴</h1>
-        <p class="lede">点击省份，查看常见姓氏份额和主要民族构成。搜索某一姓氏或民族时，地图按聚集程度着色。</p>
+        <p class="lede">点击省份进入地级地图，再点城市查看示意构成。搜索姓氏或民族时，按当前这一层的聚集程度着色。</p>
       </div>
     </div>
     <form id="search-form" class="search-card" role="search">
@@ -78,6 +95,7 @@ app.innerHTML = `
         <button type="button" data-example="surname:林">林</button>
         <button type="button" data-example="surname:陈">陈</button>
         <button type="button" data-example="surname:马">马</button>
+        <button type="button" data-example="surname:欧阳">欧阳</button>
         <button type="button" data-example="ethnicity:壮族">壮族</button>
         <button type="button" data-example="ethnicity:回族">回族</button>
         <button type="button" data-example="ethnicity:朝鲜族">朝鲜族</button>
@@ -87,8 +105,11 @@ app.innerHTML = `
   <main class="layout">
     <section class="map-card" aria-labelledby="map-title">
       <div class="map-toolbar">
-        <h2 id="map-title">省级地图</h2>
-        <p id="map-status">可拖拽、滚轮缩放。灰色表示暂无同口径数据。</p>
+        <div>
+          <p class="crumb" id="crumb"><button type="button" id="back-nation" hidden>返回全国</button><span id="crumb-here">全国</span></p>
+          <h2 id="map-title">省级地图</h2>
+        </div>
+        <p id="map-status">可拖拽、滚轮缩放。点击省份进入地级地图。灰色表示暂无同口径数据。</p>
       </div>
       <div id="chart" class="chart" role="img" aria-label="中国省级地图。点击省份可查看详情。">
         <p id="chart-status" class="chart-status">正在加载省级底图…</p>
@@ -102,7 +123,7 @@ app.innerHTML = `
   </main>
   <footer class="footer">
     <p><strong>数据说明。</strong>本站姓氏与民族比例均为示意/整理数据，依据公开的人口普查摘要、常见姓氏排行和众所周知的区域分布格局整理，用来做省级地理浏览。这不是官方微观数据，不能当作统计公报、户籍或研究采信依据。</p>
-    <p>地图使用阿里云 DataV GeoAtlas 公开省级边界，范围含香港、澳门和台湾。这三地暂无与内地同口径的整理数据，点击后显示暂无。南海诸岛界线只作底图示意。</p>
+    <p>地图使用阿里云 DataV GeoAtlas 公开边界：全国为省级，下钻后为地级市、自治州、地区、盟，直辖市为市辖区，海南含省直辖县。香港、澳门和台湾暂无同口径整理数据。南海诸岛界线只作底图示意。</p>
   </footer>
   <div id="live" class="sr-only" aria-live="polite"></div>
 `;
@@ -119,6 +140,9 @@ const rank = document.querySelector<HTMLElement>("#rank")!;
 const detail = document.querySelector<HTMLElement>("#detail")!;
 const live = document.querySelector<HTMLElement>("#live")!;
 const mapStatus = document.querySelector<HTMLElement>("#map-status")!;
+const mapTitle = document.querySelector<HTMLElement>("#map-title")!;
+const backNation = document.querySelector<HTMLButtonElement>("#back-nation")!;
+const crumbHere = document.querySelector<HTMLElement>("#crumb-here")!;
 const modeButtons = [...document.querySelectorAll<HTMLButtonElement>("[data-mode]")];
 
 function currentSuggestions() {
@@ -226,23 +250,45 @@ function renderChrome() {
   else formNote.textContent = "清除后恢复不着色的默认底图。点开省份时，姓氏和民族会一起显示。";
 }
 
+function activeRanked() {
+  if (!state.query) return [];
+  if (state.level === "province" && state.cityPack && state.province) {
+    return rankCities(state.cityPack, state.mode, state.query, state.province);
+  }
+  return rankProvinces(state.mode, state.query);
+}
+
 function renderLegend() {
+  const drilled = state.level === "province" && state.province;
+  backNation.hidden = !drilled;
+  crumbHere.textContent = drilled ? fullName(state.province ?? "") : "全国";
+  mapTitle.textContent = drilled ? `${fullName(state.province ?? "")} · 地级` : "省级地图";
   if (!state.query) {
-    legend.innerHTML = `<p>默认底图不表示数值。选择姓氏或民族后，颜色越深，占该省人口的示意比例越高。灰色为暂无数据。</p>`;
-    mapStatus.textContent = "可拖拽、滚轮缩放。灰色表示暂无同口径数据。";
+    legend.innerHTML = drilled
+      ? `<p>当前是地级地图，底色不表示数值。搜索后按这一层的示意比例着色。点「返回全国」回到省级。</p>`
+      : `<p>默认底图不表示数值。选择姓氏或民族后，颜色越深，示意比例越高。点击省份进入地级地图。灰色为暂无数据。</p>`;
+    mapStatus.textContent = drilled
+      ? "可拖拽、滚轮缩放。点击城市查看示意构成。"
+      : "可拖拽、滚轮缩放。点击省份进入地级地图。灰色表示暂无同口径数据。";
     return;
   }
-  const ranked = rankProvinces(state.mode, state.query);
+  const ranked = activeRanked();
+  const flat = isFlatSpread(ranked.map((item) => item.share));
   const max = ranked[0]?.share ?? 0;
-  legend.innerHTML = `
-    <div class="legend-scale">
-      <span>0%</span>
-      <div class="legend-bar" style="background:${legendGradient()}"></div>
-      <span>${esc(formatPct(max))}</span>
-    </div>
-    <p>「${esc(state.query)}」占各省人口的示意比例。深色更高，灰色为暂无数据。</p>
-  `;
-  mapStatus.textContent = `正在按「${state.query}」的省级比例着色。`;
+  const scope = drilled ? "当前各地级单位" : "各省";
+  if (flat) {
+    legend.innerHTML = `<p>「${esc(state.query)}」在${scope}的示意比例很接近，没有明显高低差。最高约 ${esc(formatPct(max))}。</p>`;
+  } else {
+    legend.innerHTML = `
+      <div class="legend-scale">
+        <span>低</span>
+        <div class="legend-bar" style="background:${legendGradient()}"></div>
+        <span>${esc(formatPct(max))}</span>
+      </div>
+      <p>「${esc(state.query)}」占${scope}人口的示意比例。深色更高。</p>
+    `;
+  }
+  mapStatus.textContent = `正在按「${state.query}」在${drilled ? "地级" : "省级"}的比例着色。`;
 }
 
 function renderRank() {
@@ -252,7 +298,8 @@ function renderRank() {
     return;
   }
   const entry = entryOf(state.mode, state.query);
-  const ranked = rankProvinces(state.mode, state.query);
+  const ranked = activeRanked();
+  const cityMode = state.level === "province" && state.cityPack;
   if (!entry) {
     rank.hidden = true;
     return;
@@ -264,15 +311,16 @@ function renderRank() {
   rank.hidden = false;
   rank.innerHTML = `
     <header class="card-head">
-      <p class="eyebrow">${modeLabel(state.mode)}聚集</p>
+      <p class="eyebrow">${cityMode ? "地级聚集" : `${modeLabel(state.mode)}聚集`}</p>
       <h2>「${esc(state.query)}」</h2>
-      <p class="hint">${esc(entry.hint)}。全国参照份额 ${esc(formatPct(entry.nationalShare))}。</p>
+      <p class="hint">${cityMode ? `按${esc(fullName(state.province ?? ""))}各地的示意比例排序。` : `${esc(entry.hint)}。全国参照份额 ${esc(formatPct(entry.nationalShare))}。`}</p>
     </header>
     <div class="rank-list">
       ${visible
         .map((province, index) => {
           const width = Math.max(0, (province.share / max) * 100);
-          const selected = state.selected === province.short ? " is-selected" : "";
+          const selectedName = state.level === "province" ? state.city : state.province;
+          const selected = selectedName === province.short ? " is-selected" : "";
           return `<button type="button" class="rank-row${selected}" data-province="${esc(province.short)}">
             <span class="rank-index">${index + 1}</span>
             <span class="rank-name">${esc(province.short)}</span>
@@ -284,15 +332,59 @@ function renderRank() {
     </div>
     ${
       positive.length > 8
-        ? `<button type="button" id="expand-rank" class="text-btn">${state.rankExpanded ? "收起" : `展开全部 ${positive.length} 个有比例的省级单位`}</button>`
+        ? `<button type="button" id="expand-rank" class="text-btn">${state.rankExpanded ? "收起" : `展开全部 ${positive.length} 个有比例的单位`}</button>`
         : ""
     }
-    ${hiddenZero ? `<p class="fine">其余 ${hiddenZero} 个有数据的省级单位，示意比例为 0.00%。</p>` : ""}
+    ${hiddenZero ? `<p class="fine">其余 ${hiddenZero} 个单位的示意比例为 0.00%。</p>` : ""}
   `;
 }
 
+function renderCityDetail(city: string, pack: CityFile, province: string) {
+  const surnames = topSurnamesAt(pack, city, province);
+  const ethnic = ethnicCompositionAt(pack, city, province);
+  const tracked = trackedSurnameTotalAt(pack, city, province);
+  const entry = state.query ? entryOf(state.mode, state.query) : undefined;
+  const activeShare = entry ? cityUnitShareSafe(pack, city, province) : null;
+  const callout =
+    entry && activeShare !== null
+      ? `<p class="callout">「${esc(state.query)}」在${esc(city)}的示意比例为 <strong>${esc(formatPct(activeShare))}</strong>。</p>`
+      : "";
+  const localEthnic = cityHasLocalEthnicity(pack, city);
+  detail.innerHTML = `
+    <header class="card-head">
+      <p class="eyebrow">${esc(fullName(province))} · 示意/整理数据</p>
+      <h2 tabindex="-1">${esc(city)}</h2>
+      <p class="hint">${localEthnic ? "民族构成按当地公开格局单列，姓氏只在市内差异清楚时才偏离全省。" : "这一级没有单独拉开的民族差异，民族构成沿用全省示意。没有单独列出的姓氏，与全省示意比例相同。"}</p>
+    </header>
+    ${callout}
+    <h3>常见姓氏</h3>
+    <div class="metrics">${renderBars(surnames, "surname")}</div>
+    <p class="fine">表内姓氏合计约占 ${esc(formatPct(tracked))}。地级数字是示意，不是官方微观数据。</p>
+    <h3>民族构成</h3>
+    <div class="stack" aria-hidden="true">${ethnic
+      .map((row) => `<span style="width:${row.share.toFixed(2)}%;background:${ethnicColor(row.name)}" title="${esc(row.name)} ${esc(formatPct(row.share))}"></span>`)
+      .join("")}</div>
+    <div class="metrics">${renderBars(ethnic, "ethnic")}</div>
+  `;
+}
+
+function cityUnitShareSafe(pack: CityFile, city: string, province: string): number {
+  if (!state.query) return 0;
+  const entry = entryOf(state.mode, state.query);
+  const provinceShare = entry?.shares[province] ?? 0;
+  return state.mode === "surname"
+    ? (pack.surnameShares[state.query]?.[pack.cities.indexOf(city)] ?? provinceShare)
+    : pack.ethnicity[city]
+      ? (pack.ethnicity[city][state.query] ?? 0)
+      : provinceShare;
+}
+
 function renderDetailSafe() {
-  if (!state.selected) {
+  if (state.level === "province" && state.city && state.cityPack && state.province) {
+    renderCityDetail(state.city, state.cityPack, state.province);
+    return;
+  }
+  if (!state.province) {
     detail.innerHTML = `
       <header class="card-head">
         <p class="eyebrow">省份详情</p>
@@ -302,17 +394,17 @@ function renderDetailSafe() {
     `;
     return;
   }
-  if (isUnavailable(state.selected)) {
+  if (isUnavailable(state.province)) {
     detail.innerHTML = `
       <header class="card-head">
         <p class="eyebrow">暂无同口径数据</p>
-        <h2 tabindex="-1">${esc(fullName(state.selected))}</h2>
-        <p class="hint">${esc(unavailableNote(state.selected))}地图仍标出该地区。这里不提供姓氏或民族比例。</p>
+        <h2 tabindex="-1">${esc(fullName(state.province))}</h2>
+        <p class="hint">${esc(unavailableNote(state.province))}地图仍标出该地区。这里不提供姓氏或民族比例。</p>
       </header>
     `;
     return;
   }
-  const name = state.selected;
+  const name = state.province;
   const surnames = topSurnames(name);
   const ethnic = ethnicComposition(name);
   const title = fullName(name);
@@ -329,6 +421,7 @@ function renderDetailSafe() {
       <h2 tabindex="-1">${esc(title)}</h2>
       <p class="hint">${esc(provinceBlurb(name))}</p>
     </header>
+    ${state.level === "province" ? `<p class="fine">已进入地级地图。点击城市，查看该地的姓氏和民族示意。</p>` : ""}
     ${callout}
     <h3>常见姓氏</h3>
     <div class="metrics">${renderBars(surnames, "surname")}</div>
@@ -365,18 +458,62 @@ function refresh() {
   renderLegend();
   renderRank();
   renderDetailSafe();
-  const shares = state.query ? new Map(rankProvinces(state.mode, state.query).map((item) => [item.short, item.share])) : null;
+  const ranked = activeRanked();
+  const shares = state.query ? new Map(ranked.map((item) => [item.short, item.share])) : null;
   atlas?.setView({
-    selected: state.selected,
+    level: state.level,
+    adcode: state.level === "province" && state.province ? ADCODE[state.province] : null,
+    selected: state.level === "province" ? state.city : state.province,
     query: state.query || null,
     shares,
+    flat: isFlatSpread(ranked.map((item) => item.share)),
   });
   if (state.booted) {
     const queryText = state.query ? `已按${modeLabel(state.mode)}「${state.query}」高亮` : "已恢复默认地图";
-    const selectedText = state.selected ? `，当前为${fullName(state.selected)}` : "";
+    const place = state.city ?? (state.province ? fullName(state.province) : "");
+    const selectedText = place ? `，当前为${place}` : "";
     live.textContent = queryText + selectedText;
   }
   state.booted = true;
+}
+
+async function openProvince(short: string) {
+  const token = ++drillToken;
+  if (isUnavailable(short)) {
+    state.level = "nation";
+    state.province = short;
+    state.city = null;
+    state.cityPack = null;
+    refresh();
+    focusDetail();
+    return;
+  }
+  mapStatus.textContent = `正在打开${fullName(short)}的地级地图…`;
+  try {
+    const pack = await loadCityFile(short);
+    if (token !== drillToken) return;
+    await atlas?.ensureCity(ADCODE[short]);
+    if (token !== drillToken) return;
+    state.level = "province";
+    state.province = short;
+    state.city = null;
+    state.cityPack = pack;
+    state.rankExpanded = false;
+    refresh();
+    focusDetail();
+  } catch (error) {
+    if (token !== drillToken) return;
+    state.error = error instanceof Error ? error.message : "地级地图加载失败";
+    renderChrome();
+  }
+}
+
+function backToNation() {
+  drillToken += 1;
+  state.level = "nation";
+  state.city = null;
+  state.cityPack = null;
+  refresh();
 }
 
 function focusDetail() {
@@ -452,8 +589,13 @@ rank.addEventListener("click", (event) => {
   const target = event.target as HTMLElement;
   const provinceButton = target.closest<HTMLButtonElement>("button[data-province]");
   if (provinceButton?.dataset.province) {
-    state.selected = provinceButton.dataset.province;
-    refresh();
+    const unit = provinceButton.dataset.province;
+    if (state.level === "province") {
+      state.city = unit;
+      refresh();
+    } else {
+      void openProvince(unit);
+    }
     if (window.innerWidth < 960) detail.scrollIntoView({ behavior: "smooth", block: "start" });
     focusDetail();
     return;
@@ -479,11 +621,18 @@ document.addEventListener("keydown", (event) => {
 
 refresh();
 
+backNation.addEventListener("click", () => backToNation());
+
 mountMap(chartEl, (name) => {
-  state.selected = name;
-  refresh();
+  if (state.level === "province") {
+    state.city = name;
+    refresh();
+    if (window.innerWidth < 960) detail.scrollIntoView({ behavior: "smooth", block: "start" });
+    focusDetail();
+    return;
+  }
+  void openProvince(name);
   if (window.innerWidth < 960) detail.scrollIntoView({ behavior: "smooth", block: "start" });
-  focusDetail();
 })
   .then((map) => {
     atlas = map;

@@ -1,6 +1,8 @@
 import { writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { writeCityFiles } from "./city-layer.mjs";
+import { EXTRA_SPEC, tokenizeYuan, YUAN_TEXT } from "./extra-surnames.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -213,11 +215,33 @@ const ALIAS = {
   邱: ["丘"],
 };
 
-if (RAW_SURNAMES.length !== 100) {
-  throw new Error(`姓氏数量应为 100，实际 ${RAW_SURNAMES.length}`);
+const ALIAS_SKIP = new Set(Object.values(ALIAS).flat());
+const baseNames = new Set(RAW_SURNAMES.map(([name]) => name));
+const extraNames = [];
+for (const name of tokenizeYuan(YUAN_TEXT)) {
+  if (baseNames.has(name) || ALIAS_SKIP.has(name) || extraNames.includes(name)) continue;
+  extraNames.push(name);
+}
+if (extraNames.length < 250) throw new Error(`扩展姓氏过少：${extraNames.length}`);
+const extraStart = 0.062;
+const extraEnd = 0.01;
+const extraRatio = extraNames.length === 1 ? 1 : (extraEnd / extraStart) ** (1 / (extraNames.length - 1));
+let extraValue = extraStart;
+const extraRaw = extraNames.map((name) => {
+  const nationalShare = Number(extraValue.toFixed(4));
+  extraValue *= extraRatio;
+  return [name, nationalShare, EXTRA_SPEC[name] ?? ""];
+});
+const extraSum = extraRaw.reduce((sum, item) => sum + item[1], 0);
+const extraScale = 8 / extraSum;
+for (const item of extraRaw) item[1] = Number((item[1] * extraScale).toFixed(4));
+
+const ALL_SURNAMES = [...RAW_SURNAMES, ...extraRaw];
+if (ALL_SURNAMES.length < 380 || ALL_SURNAMES.length > 460) {
+  throw new Error(`姓氏数量应在 380 到 460 之间，实际 ${ALL_SURNAMES.length}`);
 }
 
-const surnames = RAW_SURNAMES.map(([name, nationalShare, spec], index) => ({
+const surnames = ALL_SURNAMES.map(([name, nationalShare, spec], index) => ({
   name,
   rank: index + 1,
   referenceShare: nationalShare,
@@ -271,10 +295,15 @@ for (let i = 0; i < 60; i += 1) {
   scaleColumns();
 }
 
+function roundShare(value) {
+  if (!(value > 0)) return 0;
+  return Number(value.toFixed(value < 1 ? 3 : 2));
+}
+
 const shares = surnames.map((item, s) => {
   const row = {};
   PROVINCES.forEach((name, p) => {
-    row[name] = Number(matrix[s][p].toFixed(2));
+    row[name] = roundShare(matrix[s][p]);
   });
   return row;
 });
@@ -299,16 +328,18 @@ function weightedShare(row) {
 
 const surnameRecords = surnames.map((item, index) => {
   const row = shares[index];
-  const ranked = PROVINCES.map((name) => ({ name, share: row[name] }))
-    .sort((a, b) => b.share - a.share)
-    .slice(0, 3)
-    .map((entry) => entry.name);
+  const ranked = PROVINCES.map((name) => ({ name, share: row[name] })).sort((a, b) => b.share - a.share);
+  const maxShare = ranked[0]?.share ?? 0;
+  const medianShare = ranked[Math.floor(ranked.length / 2)]?.share ?? 0;
+  const peaked = maxShare >= medianShare * 1.8 && maxShare >= medianShare + 0.01;
   return {
     name: item.name,
     rank: item.rank,
-    nationalShare: Number(weightedShare(row).toFixed(2)),
+    nationalShare: Number(weightedShare(row).toFixed(item.referenceShare < 0.2 ? 3 : 2)),
     alias: item.alias,
-    hint: `示意上相对集中于${ranked.join("、")}`,
+    hint: peaked
+      ? `示意上相对集中于${ranked.slice(0, 3).map((entry) => entry.name).join("、")}`
+      : "省际差异不大，多数地方只有很低的示意比例",
     shares: row,
   };
 });
@@ -348,6 +379,10 @@ expect(shareOf("黎", "海南") > shareOf("黎", "北京") * 2, "黎应在海南
 expect(shareOf("黎", "海南") > 1, "黎在海南应形成可见聚集");
 expect(shareOf("金", "吉林") > shareOf("金", "浙江") * 1.4, "金应在吉林高于浙江");
 expect(shareOf("杨", "四川") > shareOf("杨", "北京"), "杨应在四川高于北京");
+expect(shareOf("欧阳", "江西") > shareOf("欧阳", "山东") * 1.8, "欧阳应集中于江西");
+expect(shareOf("朴", "吉林") > shareOf("朴", "河南"), "朴应在吉林更高");
+expect(shareOf("区", "广东") > shareOf("区", "山东") * 2, "区应集中于广东");
+expect(surnames.length >= 380, "扩展后的姓氏不足");
 expect(["王", "李", "张", "刘", "孙"].includes(topNames("山东")[0].name), `山东首位异常：${topNames("山东")[0].name}`);
 expect(["陈", "林", "黄", "李"].includes(topNames("广东")[0].name), `广东首位异常：${topNames("广东")[0].name}`);
 expect(["陈", "林", "黄"].includes(topNames("福建")[0].name), `福建首位异常：${topNames("福建")[0].name}`);
@@ -358,7 +393,7 @@ expect(columnSum("宁夏") > 40, "宁夏仍应有可观的常见姓覆盖");
 
 for (const name of PROVINCES) {
   const sum = columnSum(name);
-  expect(sum > 8 && sum < 96, `${name} 姓氏合计 ${sum.toFixed(2)} 超出预期`);
+  expect(sum > 8 && sum < 98, `${name} 姓氏合计 ${sum.toFixed(2)} 超出预期`);
   for (const item of surnameRecords) {
     expect(item.shares[name] >= 0, `${item.name} 在 ${name} 为负`);
   }
@@ -385,7 +420,7 @@ const surnameFile = {
   meta: {
     label: "示意/整理数据",
     description:
-      "约 100 个常见姓的省级示意比例。全国参照量级综合公开常见姓排行整理，省际差异按众所周知的区域格局分配，并用人口权重做了内部校准。不是官方微观数据，不能当作户籍或精确统计。",
+      "约四百个常见姓的省级示意比例。前一百姓沿用公开常见姓排行的量级，其后姓氏按公开四百大姓的顺序延伸。只在格局清楚的姓上拉开省际差距，其余保持低而分散的份额。不是官方微观数据。",
     method:
       "以常见姓全国参照份额为行目标，以各省对这套姓氏体系的覆盖程度为列目标，经区域权重播种后做比例拟合。港澳台未纳入。",
     unit: "占该省级单位人口的百分比",
@@ -544,7 +579,8 @@ const ethnicityFile = {
 writeFileSync(join(root, "data/surnames.json"), `${JSON.stringify(surnameFile, null, 2)}\n`);
 writeFileSync(join(root, "data/ethnicities.json"), `${JSON.stringify(ethnicityFile, null, 2)}\n`);
 
-console.log(`姓氏 ${surnameRecords.length}，民族 ${groups.length}，省份 ${PROVINCES.length}`);
+const cityIndex = writeCityFiles(root, surnameRecords);
+console.log(`姓氏 ${surnameRecords.length}，民族 ${groups.length}，省份 ${PROVINCES.length}，地级数据 ${Object.keys(cityIndex).length}`);
 console.log(`常见姓全国参照合计 ${nationalSum.toFixed(2)}%，加权覆盖 ${weightedCoverage.toFixed(3)}`);
 for (const name of PROVINCES) {
   const top = topNames(name, 4)
