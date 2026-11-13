@@ -1,3 +1,4 @@
+import cultureFileJson from "../data/culture.json";
 import ethnicityFileJson from "../data/ethnicities.json";
 import surnameFileJson from "../data/surnames.json";
 
@@ -36,6 +37,28 @@ interface Dataset {
 
 export const surnameFile = surnameFileJson as Dataset & { surnames: SurnameEntry[] };
 export const ethnicityFile = ethnicityFileJson as Dataset & { groups: EthnicEntry[] };
+
+export interface CultureNote {
+  customs: string;
+  sights: string[];
+  specialties: string[];
+}
+
+export interface CultureFile {
+  meta: { label: string; note: string };
+  provinces: Record<string, CultureNote>;
+  cities: Record<string, Record<string, CultureNote>>;
+}
+
+export const cultureFile = cultureFileJson as CultureFile;
+
+export function cultureForProvince(short: string): CultureNote | undefined {
+  return cultureFile.provinces[short];
+}
+
+export function cultureForCity(province: string, city: string): CultureNote | undefined {
+  return cultureFile.cities[province]?.[city];
+}
 
 export const MAINLAND = surnameFile.provinces;
 export const UNAVAILABLE = surnameFile.unavailable;

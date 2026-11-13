@@ -5,6 +5,9 @@ import {
   type Mode,
   ADCODE,
   cityHasLocalEthnicity,
+  type CultureNote,
+  cultureForCity,
+  cultureForProvince,
   entryOf,
   esc,
   ethnicComposition,
@@ -123,7 +126,8 @@ app.innerHTML = `
   </main>
   <footer class="footer">
     <p><strong>数据说明。</strong>本站姓氏与民族比例均为示意/整理数据，依据公开的人口普查摘要、常见姓氏排行和众所周知的区域分布格局整理，用来做省级地理浏览。这不是官方微观数据，不能当作统计公报、户籍或研究采信依据。</p>
-    <p>地图使用阿里云 DataV GeoAtlas 公开边界：全国为省级，下钻后为地级市、自治州、地区、盟，直辖市为市辖区，海南含省直辖县。香港、澳门和台湾暂无同口径整理数据。南海诸岛界线只作底图示意。</p>
+    <p>地方介绍是整理介绍，综合公开的地方常识、常见景点和饮食手艺，不是官方旅游名录或文旅申报材料。</p>
+    <p>地图使用阿里云 DataV GeoAtlas 公开边界：全国为省级，下钻后为地级市、自治州、地区、盟，直辖市为市辖区，海南含省直辖县。香港、澳门和台湾暂无同口径的姓氏民族数据，仍可查看地方介绍。南海诸岛界线只作底图示意。</p>
   </footer>
   <div id="live" class="sr-only" aria-live="polite"></div>
 `;
@@ -339,6 +343,23 @@ function renderRank() {
   `;
 }
 
+function renderCulture(note: CultureNote | undefined): string {
+  if (!note) {
+    return `<section class="culture"><h3>地方介绍</h3><p class="fine">暂无整理介绍。</p></section>`;
+  }
+  const items = (list: string[]) => list.map((item) => `<li>${esc(item)}</li>`).join("");
+  return `<section class="culture">
+    <h3>地方介绍</h3>
+    <p class="fine">整理介绍，据公开地方常识汇编，不是官方旅游名录。</p>
+    <h4>习俗</h4>
+    <p>${esc(note.customs)}</p>
+    <h4>景点</h4>
+    <ul>${items(note.sights)}</ul>
+    <h4>特色</h4>
+    <ul>${items(note.specialties)}</ul>
+  </section>`;
+}
+
 function renderCityDetail(city: string, pack: CityFile, province: string) {
   const surnames = topSurnamesAt(pack, city, province);
   const ethnic = ethnicCompositionAt(pack, city, province);
@@ -357,6 +378,7 @@ function renderCityDetail(city: string, pack: CityFile, province: string) {
       <p class="hint">${localEthnic ? "民族构成按当地公开格局单列，姓氏只在市内差异清楚时才偏离全省。" : "这一级没有单独拉开的民族差异，民族构成沿用全省示意。没有单独列出的姓氏，与全省示意比例相同。"}</p>
     </header>
     ${callout}
+    ${renderCulture(cultureForCity(province, city))}
     <h3>常见姓氏</h3>
     <div class="metrics">${renderBars(surnames, "surname")}</div>
     <p class="fine">表内姓氏合计约占 ${esc(formatPct(tracked))}。地级数字是示意，不是官方微观数据。</p>
@@ -399,8 +421,9 @@ function renderDetailSafe() {
       <header class="card-head">
         <p class="eyebrow">暂无同口径数据</p>
         <h2 tabindex="-1">${esc(fullName(state.province))}</h2>
-        <p class="hint">${esc(unavailableNote(state.province))}地图仍标出该地区。这里不提供姓氏或民族比例。</p>
+        <p class="hint">${esc(unavailableNote(state.province))}这里不提供可与内地对照的姓氏或民族比例。</p>
       </header>
+      ${renderCulture(cultureForProvince(state.province))}
     `;
     return;
   }
@@ -421,11 +444,12 @@ function renderDetailSafe() {
       <h2 tabindex="-1">${esc(title)}</h2>
       <p class="hint">${esc(provinceBlurb(name))}</p>
     </header>
-    ${state.level === "province" ? `<p class="fine">已进入地级地图。点击城市，查看该地的姓氏和民族示意。</p>` : ""}
+    ${state.level === "province" ? `<p class="fine">已进入地级地图。点击城市，查看该地自己的介绍，以及姓氏和民族示意。</p>` : ""}
     ${callout}
+    ${renderCulture(cultureForProvince(name))}
     <h3>常见姓氏</h3>
     <div class="metrics">${renderBars(surnames, "surname")}</div>
-    <p class="fine">表内约一百个常见姓合计约占 ${esc(formatPct(tracked))}。其余为其他姓氏，或未纳入这套姓氏的命名。</p>
+    <p class="fine">表内常见姓合计约占 ${esc(formatPct(tracked))}。其余为其他姓氏，或未纳入这套姓氏的命名。</p>
     <h3>民族构成</h3>
     <div class="stack" aria-hidden="true">${ethnic
       .map((row) => `<span style="width:${row.share.toFixed(2)}%;background:${ethnicColor(row.name)}" title="${esc(row.name)} ${esc(formatPct(row.share))}"></span>`)

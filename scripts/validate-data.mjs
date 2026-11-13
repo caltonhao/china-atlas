@@ -124,9 +124,30 @@ expect(xinjiang.ethnicity["喀什地区"]["维吾尔族"] > 80, "喀什维吾尔
 const hainan = JSON.parse(readFileSync(join(root, "public/data/cities/海南.json"), "utf8"));
 expect(hainan.ethnicity["白沙黎族自治县"]["黎族"] > 40, "白沙黎族应很高");
 
+const culture = JSON.parse(readFileSync(join(root, "data/culture.json"), "utf8"));
+const cityIndex = JSON.parse(readFileSync(join(root, "public/data/city-index.json"), "utf8"));
+function expectCulture(note, key) {
+  expect(note && typeof note.customs === "string" && note.customs.length >= 8, `${key} 缺少习俗`);
+  expect(Array.isArray(note?.sights) && note.sights.length >= 1, `${key} 缺少景点`);
+  expect(Array.isArray(note?.specialties) && note.specialties.length >= 1, `${key} 缺少特色`);
+}
+for (const name of [...provinces, "香港", "澳门", "台湾"]) {
+  expectCulture(culture.provinces[name], name);
+}
+for (const [name, entry] of Object.entries(cityIndex.provinces)) {
+  for (const city of entry.cities) {
+    const note = culture.cities[name]?.[city];
+    expectCulture(note, `${name}/${city}`);
+    if (note && culture.provinces[name] && note.customs === culture.provinces[name].customs) {
+      expect(false, `${name}/${city} 习俗与全省相同`);
+    }
+  }
+}
+expect(culture.meta.label.includes("整理"), "地方介绍应标注整理");
+
 if (failures.length) {
   console.error(failures.join("\n"));
   process.exit(1);
 }
 
-console.log(`数据校验通过：${surnames.surnames.length} 个姓氏，${ethnicities.groups.length} 个民族，${provinces.length} 个省级单位。`);
+console.log(`数据校验通过：${surnames.surnames.length} 个姓氏，${ethnicities.groups.length} 个民族，${provinces.length} 个省级单位，地方介绍已覆盖省市。`);
