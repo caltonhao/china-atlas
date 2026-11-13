@@ -40,8 +40,8 @@ export const ethnicityFile = ethnicityFileJson as Dataset & { groups: EthnicEntr
 
 export interface CultureNote {
   customs: string;
-  sights: string[];
-  specialties: string[];
+  sights: string;
+  specialties: string;
 }
 
 export interface CultureFile {

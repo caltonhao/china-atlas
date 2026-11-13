@@ -354,15 +354,13 @@ input[type="search"]::-webkit-search-cancel-button { appearance: none; }
   font-size: 16px;
 }
 
-.culture p { margin: 0; color: var(--ink-soft); }
-
-.culture ul {
+.culture p {
   margin: 0;
-  padding-left: 1.15em;
   color: var(--ink-soft);
+  line-height: 1.75;
 }
 
-.culture li { margin: 3px 0; }
+.culture h4 + p { margin-bottom: 2px; }
 
 .rank-list, .metrics { display: flex; flex-direction: column; gap: 6px; }
 

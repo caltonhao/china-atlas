@@ -347,16 +347,15 @@ function renderCulture(note: CultureNote | undefined): string {
   if (!note) {
     return `<section class="culture"><h3>地方介绍</h3><p class="fine">暂无整理介绍。</p></section>`;
   }
-  const items = (list: string[]) => list.map((item) => `<li>${esc(item)}</li>`).join("");
   return `<section class="culture">
     <h3>地方介绍</h3>
-    <p class="fine">整理介绍，据公开地方常识汇编，不是官方旅游名录。</p>
+    <p class="fine">整理介绍，据公开地方常识写成的短文，不是官方旅游名录。</p>
     <h4>习俗</h4>
     <p>${esc(note.customs)}</p>
     <h4>景点</h4>
-    <ul>${items(note.sights)}</ul>
+    <p>${esc(note.sights)}</p>
     <h4>特色</h4>
-    <ul>${items(note.specialties)}</ul>
+    <p>${esc(note.specialties)}</p>
   </section>`;
 }
 

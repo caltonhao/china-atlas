@@ -127,9 +127,12 @@ expect(hainan.ethnicity["白沙黎族自治县"]["黎族"] > 40, "白沙黎族�
 const culture = JSON.parse(readFileSync(join(root, "data/culture.json"), "utf8"));
 const cityIndex = JSON.parse(readFileSync(join(root, "public/data/city-index.json"), "utf8"));
 function expectCulture(note, key) {
-  expect(note && typeof note.customs === "string" && note.customs.length >= 8, `${key} 缺少习俗`);
-  expect(Array.isArray(note?.sights) && note.sights.length >= 1, `${key} 缺少景点`);
-  expect(Array.isArray(note?.specialties) && note.specialties.length >= 1, `${key} 缺少特色`);
+  for (const field of ["customs", "sights", "specialties"]) {
+    const text = note?.[field];
+    expect(typeof text === "string" && text.length >= 36, `${key} 的${field}过短`);
+    expect((text.match(/。/g) || []).length >= 2, `${key} 的${field}句子太少`);
+    expect(typeof text === "string" && /[。！？]/.test(text), `${key} 的${field}不是完整句子`);
+  }
 }
 for (const name of [...provinces, "香港", "澳门", "台湾"]) {
   expectCulture(culture.provinces[name], name);
@@ -138,8 +141,9 @@ for (const [name, entry] of Object.entries(cityIndex.provinces)) {
   for (const city of entry.cities) {
     const note = culture.cities[name]?.[city];
     expectCulture(note, `${name}/${city}`);
-    if (note && culture.provinces[name] && note.customs === culture.provinces[name].customs) {
-      expect(false, `${name}/${city} 习俗与全省相同`);
+    const provinceNote = culture.provinces[name];
+    if (note && provinceNote && (note.customs === provinceNote.customs || note.sights === provinceNote.sights)) {
+      expect(false, `${name}/${city} 介绍与全省相同`);
     }
   }
 }
