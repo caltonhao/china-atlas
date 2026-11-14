@@ -75,6 +75,10 @@ export function isUnavailable(short: string): boolean {
   return UNAVAILABLE.some((province) => province.short === short);
 }
 
+export function isKnownProvince(short: string): boolean {
+  return fullByShort.has(short);
+}
+
 export function unavailableNote(short: string): string {
   return UNAVAILABLE.find((province) => province.short === short)?.note ?? "暂无整理数据。";
 }
@@ -366,4 +370,212 @@ export function provinceBlurb(short: string): string {
 
 export function modeLabel(mode: Mode): string {
   return mode === "surname" ? "姓氏" : "民族";
+}
+
+export type SearchFilter = "all" | Mode | "place";
+
+export interface SearchHit {
+  kind: "surname" | "ethnicity" | "place";
+  title: string;
+  note: string;
+  commit: string;
+  via?: string;
+  province?: string;
+  city?: string | null;
+  facet?: string;
+  score: number;
+}
+
+export function popularSurnames(count = 10): string[] {
+  return [...surnameFile.surnames]
+    .sort((a, b) => a.rank - b.rank || a.name.localeCompare(b.name, "zh"))
+    .slice(0, count)
+    .map((item) => item.name);
+}
+
+interface PlaceRecord {
+  province: string;
+  city: string | null;
+  name: string;
+  full: string;
+  customs: string;
+  sights: string;
+  specialties: string;
+}
+
+const placeRecords: PlaceRecord[] = [];
+
+for (const province of [...MAINLAND, ...UNAVAILABLE]) {
+  const note = cultureFile.provinces[province.short];
+  if (!note) continue;
+  placeRecords.push({
+    province: province.short,
+    city: null,
+    name: province.short,
+    full: province.full,
+    customs: note.customs,
+    sights: note.sights,
+    specialties: note.specialties,
+  });
+}
+
+for (const [province, cities] of Object.entries(cultureFile.cities)) {
+  for (const [city, note] of Object.entries(cities)) {
+    placeRecords.push({
+      province,
+      city,
+      name: city,
+      full: city,
+      customs: note.customs,
+      sights: note.sights,
+      specialties: note.specialties,
+    });
+  }
+}
+
+function snippetAround(text: string, index: number, length: number): string {
+  const start = Math.max(0, index - 10);
+  const end = Math.min(text.length, index + length + 12);
+  let slice = text.slice(start, end).replace(/\s+/g, "");
+  if (start > 0) slice = `…${slice}`;
+  if (end < text.length) slice = `${slice}…`;
+  return slice;
+}
+
+function placeNameScore(name: string, full: string, query: string): number {
+  const bare = name.replace(/(特别行政区|自治区|自治州|自治县|地区|林区|市|盟|县|区)$/u, "");
+  const exact = name === query || full === query || (bare.length >= 2 && bare === query);
+  if (exact) return 0.4;
+  const prefixed =
+    name.startsWith(query) || full.startsWith(query) || (bare.length >= 2 && bare.startsWith(query));
+  if (prefixed) return 1.4;
+  if (query.length < 2) return -1;
+  if (name.includes(query) || full.includes(query) || bare.includes(query)) return 2.4;
+  return -1;
+}
+
+function placeWhere(record: PlaceRecord): string {
+  if (!record.city) return record.full;
+  return `${fullName(record.province)} · ${record.city}`;
+}
+
+function surnameHits(query: string): SearchHit[] {
+  const hits: SearchHit[] = [];
+  for (const item of surnameFile.surnames) {
+    let score = -1;
+    let via: string | undefined;
+    if (item.name === query) score = 0;
+    else if (item.alias.includes(query)) {
+      score = 0.15;
+      via = query;
+    } else if (item.name.startsWith(query)) score = 1;
+    else if (item.alias.some((alias) => alias.startsWith(query))) score = 1.15;
+    else if (item.name.includes(query)) score = 2;
+    else if (item.alias.some((alias) => alias.includes(query))) {
+      score = 2.15;
+      via = item.alias.find((alias) => alias.includes(query));
+    }
+    if (score < 0) continue;
+    hits.push({
+      kind: "surname",
+      title: item.name,
+      note: via ? `亦作${item.alias.join("、")}` : item.hint,
+      commit: item.name,
+      via,
+      facet: "姓氏",
+      score,
+    });
+  }
+  return hits;
+}
+
+function ethnicityHits(query: string): SearchHit[] {
+  return ethnicityFile.groups
+    .map((group) => ({ group, score: ethnicScore(group.name, query) }))
+    .filter((item) => item.score >= 0)
+    .sort((a, b) => a.score - b.score || b.group.nationalShare - a.group.nationalShare)
+    .map((item) => ({
+      kind: "ethnicity" as const,
+      title: item.group.name,
+      note: item.group.hint,
+      commit: item.group.name,
+      facet: "民族",
+      score: item.score + 0.05,
+    }));
+}
+
+function placeHits(query: string, namesOnly = false): SearchHit[] {
+  if (!query) return [];
+  const hits: SearchHit[] = [];
+  for (const record of placeRecords) {
+    const named = placeNameScore(record.name, record.full, query);
+    if (named >= 0) {
+      hits.push({
+        kind: "place",
+        title: record.city ?? record.full,
+        note: record.city ? fullName(record.province) : "省级",
+        commit: record.city ?? record.full,
+        province: record.province,
+        city: record.city,
+        facet: "地名",
+        score: named + (record.city ? 0.05 : 0),
+      });
+      continue;
+    }
+    if (namesOnly || query.length < 2) continue;
+    const fields: Array<[string, string, number]> = [
+      ["景点", record.sights, 4],
+      ["特色", record.specialties, 4.05],
+      ["习俗", record.customs, 4.1],
+    ];
+    let best: SearchHit | null = null;
+    for (const [facet, text, base] of fields) {
+      const at = text.indexOf(query);
+      if (at < 0) continue;
+      const loose = at > 0 && !/[，。、；：\s（(]/.test(text[at - 1] ?? "");
+      const score = base + (loose ? 0.4 : 0);
+      if (best && score >= best.score) continue;
+      best = {
+        kind: "place",
+        title: query,
+        note: `${placeWhere(record)} · ${snippetAround(text, at, query.length)}`,
+        commit: query,
+        province: record.province,
+        city: record.city,
+        facet,
+        score,
+      };
+    }
+    if (best) hits.push(best);
+  }
+  hits.sort((a, b) => a.score - b.score || a.title.localeCompare(b.title, "zh") || a.note.localeCompare(b.note, "zh"));
+  return hits.slice(0, 8);
+}
+
+export function regionSuggestions(raw: string): SearchHit[] {
+  const query = raw.trim();
+  if (!query) return [];
+  return placeHits(query, true).slice(0, 8);
+}
+
+export function searchSuggestions(filter: SearchFilter, raw: string): SearchHit[] {
+  const query = raw.trim();
+  if (!query || query === "族") return [];
+  const groups: SearchHit[][] = [];
+  if (filter === "all" || filter === "surname") groups.push(surnameHits(query).slice(0, 6));
+  if (filter === "all" || filter === "ethnicity") groups.push(ethnicityHits(query).slice(0, 4));
+  if (filter === "all" || filter === "place") groups.push(placeHits(query));
+  const merged = groups
+    .flat()
+    .sort((a, b) => a.score - b.score || a.title.localeCompare(b.title, "zh") || a.note.localeCompare(b.note, "zh"));
+  const seen = new Set<string>();
+  const out: SearchHit[] = [];
+  for (const hit of merged) {
+    const key = `${hit.kind}|${hit.province ?? ""}|${hit.city ?? ""}|${hit.facet ?? ""}|${hit.title}|${hit.note}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(hit);
+    if (out.length >= 8) break;
+  }
+  return out;
 }
