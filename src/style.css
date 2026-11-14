@@ -409,6 +409,51 @@ input[type="search"]::-webkit-search-cancel-button { appearance: none; }
 
 .culture h4 + p { margin-bottom: 2px; }
 
+.spot-link {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--indigo);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.spot-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0 2px;
+}
+
+.spot-chip {
+  border: 1px solid var(--line);
+  background: #fffdf9;
+  border-radius: 999px;
+  min-height: 32px;
+  padding: 0 10px;
+  color: var(--indigo);
+}
+
+.spot-chip small {
+  margin-left: 6px;
+  color: var(--cinnabar);
+  font-size: 11px;
+}
+
+.spot-page h3 { margin-top: 16px; }
+
+.spot-page p {
+  margin: 0;
+  color: var(--ink-soft);
+  line-height: 1.75;
+}
+
+.grade {
+  margin: 10px 0 0;
+  color: var(--cinnabar-deep);
+  line-height: 1.6;
+}
+
 .data-note {
   margin: 12px 0 4px;
   padding: 10px 12px;

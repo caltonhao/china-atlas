@@ -384,6 +384,7 @@ export interface SearchHit {
   city?: string | null;
   facet?: string;
   score: number;
+  spot?: string;
 }
 
 export function popularSurnames(count = 10): string[] {
@@ -558,13 +559,97 @@ export function regionSuggestions(raw: string): SearchHit[] {
   return placeHits(query, true).slice(0, 8);
 }
 
+export interface AttractionPlace {
+  province: string;
+  city: string | null;
+}
+
+export interface Attraction {
+  id: string;
+  name: string;
+  aliases: string[];
+  province: string;
+  city: string | null;
+  places: AttractionPlace[];
+  kind: "sight" | "custom";
+  grade: "5A" | "4A" | null;
+  depth: "full" | "short";
+  history: string;
+  tickets: string;
+  visit: string;
+  season: string;
+  caution: string;
+}
+
+let attractionList: Attraction[] = [];
+
+export function setAttractions(list: Attraction[]) {
+  attractionList = list;
+}
+
+export function attractionById(id: string): Attraction | undefined {
+  return attractionList.find((item) => item.id === id);
+}
+
+export function attractionsInProvince(province: string): Attraction[] {
+  return attractionList.filter((item) => item.province === province);
+}
+
+export function attractionsLoaded(): boolean {
+  return attractionList.length > 0;
+}
+
+export function attractionsFor(province: string, city: string | null): Attraction[] {
+  const list = attractionList.filter((item) =>
+    item.places.some((place) => place.province === province && (place.city ?? null) === city),
+  );
+  const sights = list
+    .filter((item) => item.kind === "sight")
+    .sort((a, b) => Number(a.depth !== "full") - Number(b.depth !== "full") || Number(a.grade !== "5A") - Number(b.grade !== "5A"));
+  const customs = list.filter((item) => item.kind === "custom");
+  return [...sights.slice(0, 8), ...customs.slice(0, 2)];
+}
+
+function spotHits(query: string): SearchHit[] {
+  if (query.length < 2) return [];
+  const hits: SearchHit[] = [];
+  for (const spot of attractionList) {
+    const names = [spot.name, ...spot.aliases];
+    let score = -1;
+    for (const name of names) {
+      if (name === query) score = score < 0 ? 0.22 : Math.min(score, 0.22);
+      else if (name.startsWith(query)) score = score < 0 ? 1.2 : Math.min(score, 1.2);
+      else if (name.includes(query)) score = score < 0 ? 2.15 : Math.min(score, 2.15);
+    }
+    if (score < 0) continue;
+    const where = spot.city ? `${fullName(spot.province)} · ${spot.city}` : fullName(spot.province);
+    const kindLabel = spot.kind === "custom" ? "习俗" : spot.grade ? `景点 · 国家${spot.grade}级` : "景点";
+    hits.push({
+      kind: "place",
+      title: spot.name,
+      note: `${where} · ${kindLabel}`,
+      commit: spot.name,
+      province: spot.province,
+      city: spot.city,
+      facet: spot.kind === "custom" ? "习俗" : "景点",
+      score,
+      spot: spot.id,
+    });
+  }
+  hits.sort((a, b) => a.score - b.score || a.title.localeCompare(b.title, "zh") || a.note.localeCompare(b.note, "zh"));
+  return hits.slice(0, 6);
+}
+
 export function searchSuggestions(filter: SearchFilter, raw: string): SearchHit[] {
   const query = raw.trim();
   if (!query || query === "族") return [];
   const groups: SearchHit[][] = [];
   if (filter === "all" || filter === "surname") groups.push(surnameHits(query).slice(0, 6));
   if (filter === "all" || filter === "ethnicity") groups.push(ethnicityHits(query).slice(0, 4));
-  if (filter === "all" || filter === "place") groups.push(placeHits(query));
+  if (filter === "all" || filter === "place") {
+    groups.push(spotHits(query));
+    groups.push(placeHits(query));
+  }
   const merged = groups
     .flat()
     .sort((a, b) => a.score - b.score || a.title.localeCompare(b.title, "zh") || a.note.localeCompare(b.note, "zh"));

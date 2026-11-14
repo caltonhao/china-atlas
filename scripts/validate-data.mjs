@@ -149,9 +149,52 @@ for (const [name, entry] of Object.entries(cityIndex.provinces)) {
 }
 expect(culture.meta.label.includes("整理"), "地方介绍应标注整理");
 
+const attractions = JSON.parse(readFileSync(join(root, "public/data/attractions.json"), "utf8"));
+expect(attractions.meta.label.includes("整理"), "景点介绍应标注整理");
+expect(attractions.meta.note.includes("不是当日官价") || attractions.meta.note.includes("不是当日"), "景点说明应提醒票价不是官价");
+const spotIds = new Set();
+const sightPlaces = new Set();
+for (const spot of attractions.spots) {
+  expect(!spotIds.has(spot.id), `景点 id 重复 ${spot.id}`);
+  spotIds.add(spot.id);
+  expect(spot.history && spot.history.length >= 20, `${spot.id} 背景过短`);
+  expect(spot.tickets && spot.tickets.length >= 8, `${spot.id} 缺少门票说明`);
+  expect(spot.visit && spot.visit.length >= 16, `${spot.id} 缺少游览说明`);
+  expect(spot.grade === null || spot.grade === "5A" || spot.grade === "4A", `${spot.id} 等级无效`);
+  if (spot.depth === "full") {
+    expect(spot.history.length >= 40, `${spot.id} 详细介绍过短`);
+    expect(spot.visit.length >= 20, `${spot.id} 详细游法过短`);
+  }
+  if (spot.kind === "sight") {
+    for (const place of spot.places) sightPlaces.add(`${place.province}/${place.city ?? ""}`);
+  }
+}
+for (const name of [...provinces, "香港", "澳门", "台湾"]) {
+  expect(sightPlaces.has(`${name}/`), `${name} 缺少可打开的景点`);
+}
+for (const [name, entry] of Object.entries(cityIndex.provinces)) {
+  for (const city of entry.cities) {
+    expect(sightPlaces.has(`${name}/${city}`), `${name}/${city} 缺少可打开的景点`);
+  }
+}
+function spotNamed(name) {
+  return attractions.spots.find((item) => item.name === name);
+}
+for (const name of ["故宫", "西湖", "泰山", "黄山", "华山", "峨眉山", "武当山", "布达拉宫", "长白山", "普陀山", "庐山", "衡山", "恒山"]) {
+  const spot = spotNamed(name);
+  expect(spot && spot.depth === "full" && spot.grade === "5A", `${name} 应为详细的国家5A介绍`);
+}
+const shennong = spotNamed("神农架");
+expect(shennong && !/野人存在|证实了野人/.test(shennong.history), "神农架不应把野人写成事实");
+const fengdu = spotNamed("丰都名山");
+expect(fengdu && /民间/.test(fengdu.history), "丰都应标明民间信仰");
+const pudacuo = attractions.spots.find((item) => item.aliases?.includes("属都湖"));
+expect(pudacuo && pudacuo.depth === "full", "属都湖应能打开普达措的介绍");
+
 if (failures.length) {
   console.error(failures.join("\n"));
   process.exit(1);
 }
 
-console.log(`数据校验通过：${surnames.surnames.length} 个姓氏，${ethnicities.groups.length} 个民族，${provinces.length} 个省级单位，地方介绍已覆盖省市。`);
+const fullSpots = attractions.spots.filter((item) => item.depth === "full").length;
+console.log(`数据校验通过：${surnames.surnames.length} 个姓氏，${ethnicities.groups.length} 个民族，${provinces.length} 个省级单位，地方介绍已覆盖省市，景点条目 ${attractions.spots.length}（详细 ${fullSpots}）。`);

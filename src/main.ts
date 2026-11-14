@@ -24,6 +24,12 @@ import {
   modeLabel,
   popularSurnames,
   provinceBlurb,
+  setAttractions,
+  attractionById,
+  attractionsFor,
+  attractionsInProvince,
+  attractionsLoaded,
+  type Attraction,
   rankCities,
   rankProvinces,
   regionSuggestions,
@@ -63,6 +69,7 @@ const state: {
   error: string;
   booted: boolean;
   drawerOpen: boolean;
+  spot: string | null;
 } = {
   filter: "all",
   queryKind: null,
@@ -80,6 +87,7 @@ const state: {
   error: "",
   booted: false,
   drawerOpen: false,
+  spot: null,
 };
 
 let drillToken = 0;
@@ -238,6 +246,7 @@ function readUrl() {
     find: params.get("find") ?? "",
     compareProvince: params.get("b"),
     compareCity: params.get("bc"),
+    spot: params.get("spot"),
   };
 }
 
@@ -256,6 +265,7 @@ function writeUrl() {
     params.set("b", state.compare.province);
     if (state.compare.city) params.set("bc", state.compare.city);
   }
+  if (state.spot) params.set("spot", state.spot);
   const current = new URLSearchParams(location.hash.replace(/^#/, ""));
   const keys = new Set([...params.keys(), ...current.keys()]);
   let same = true;
@@ -349,7 +359,8 @@ function renderChrome() {
   else if (state.find) formNote.textContent = `已按「${state.find}」打开对应地区`;
   else formNote.textContent = "姓氏和民族会给地图着色。地名、景点和特色会打开对应的省或市。";
 
-  const place = state.city ?? (state.province ? fullName(state.province) : "");
+  const spotName = state.spot ? attractionById(state.spot)?.name : "";
+  const place = spotName || state.city || (state.province ? fullName(state.province) : "");
   drawerLabel.textContent = place || (state.query ? `「${state.query}」` : "地区卡片");
   drawerSub.textContent = place ? "姓氏、民族与地方介绍" : "点开省份或城市后在这里展开";
   drawerAction.textContent = state.drawerOpen ? "收起" : "展开";
@@ -377,7 +388,7 @@ function renderCrumbs() {
   const drilled = state.level === "province" && Boolean(state.province);
   backNation.hidden = !drilled;
   const nationHere = state.level === "nation" && !state.province;
-  const provinceHere = Boolean(state.province) && !state.city;
+  const provinceHere = Boolean(state.province) && !state.city && !state.spot;
   const parts = [crumbButton("nation", "全国", nationHere)];
   if (state.province) {
     parts.push(`<span class="sep" aria-hidden="true">›</span>`);
@@ -385,7 +396,12 @@ function renderCrumbs() {
   }
   if (state.city && state.province) {
     parts.push(`<span class="sep" aria-hidden="true">›</span>`);
-    parts.push(crumbButton("city", state.city, true));
+    parts.push(crumbButton("city", state.city, !state.spot));
+  }
+  const spot = state.spot ? attractionById(state.spot) : undefined;
+  if (spot && spot.province === state.province) {
+    parts.push(`<span class="sep" aria-hidden="true">›</span>`);
+    parts.push(crumbButton("spot", spot.name, true));
   }
   crumbs.innerHTML = parts.join("");
   mapTitle.textContent = drilled ? `${fullName(state.province ?? "")} · 地级` : "省级地图";
@@ -485,17 +501,92 @@ function dataNoteHtml(): string {
   </div>`;
 }
 
-function renderCulture(note: CultureNote | undefined): string {
+function linkSpotText(text: string, spots: Attraction[]): string {
+  const tokens = spots.flatMap((spot) => [spot.name, ...spot.aliases.filter((alias) => alias.length >= 2)].map((name) => ({ name, id: spot.id })));
+  tokens.sort((a, b) => b.name.length - a.name.length);
+  const used = new Array<boolean>(text.length).fill(false);
+  const marks: { start: number; end: number; id: string; name: string }[] = [];
+  for (const token of tokens) {
+    let from = 0;
+    while (from < text.length) {
+      const at = text.indexOf(token.name, from);
+      if (at < 0) break;
+      const end = at + token.name.length;
+      if (used.slice(at, end).some(Boolean)) {
+        from = at + 1;
+        continue;
+      }
+      for (let index = at; index < end; index += 1) used[index] = true;
+      marks.push({ start: at, end, id: token.id, name: token.name });
+      from = end;
+    }
+  }
+  marks.sort((a, b) => a.start - b.start);
+  let html = "";
+  let cursor = 0;
+  for (const mark of marks) {
+    html += esc(text.slice(cursor, mark.start));
+    html += `<button type="button" class="spot-link" data-spot="${esc(mark.id)}">${esc(mark.name)}</button>`;
+    cursor = mark.end;
+  }
+  html += esc(text.slice(cursor));
+  return html;
+}
+
+function spotButtons(spots: Attraction[]): string {
+  if (!spots.length) return "";
+  return `<div class="spot-list">${spots
+    .map((spot) => {
+      const grade = spot.grade ? `<small>国家${esc(spot.grade)}级</small>` : "";
+      return `<button type="button" class="spot-chip" data-spot="${esc(spot.id)}">${esc(spot.name)}${grade}</button>`;
+    })
+    .join("")}</div>`;
+}
+
+function renderCulture(note: CultureNote | undefined, province: string, city: string | null): string {
   if (!note) return `<section class="culture"><h3>地方介绍</h3><p class="fine">暂无整理介绍。</p></section>`;
+  const shown = attractionsFor(province, city);
+  const linkable = attractionsInProvince(province);
+  const customs = shown.filter((spot) => spot.kind === "custom");
+  const sights = shown.filter((spot) => spot.kind === "sight");
   return `<section class="culture">
     <h3>地方介绍</h3>
     <h4>习俗</h4>
-    <p>${esc(note.customs)}</p>
+    <p>${linkSpotText(note.customs, linkable.filter((spot) => spot.kind === "custom"))}</p>
+    ${spotButtons(customs)}
     <h4>景点</h4>
-    <p>${esc(note.sights)}</p>
+    <p>${linkSpotText(note.sights, linkable.filter((spot) => spot.kind === "sight"))}</p>
+    <p class="fine">点景点名打开单独介绍。有国家A级的会标明，等级以最新公示为准。</p>
+    ${spotButtons(sights)}
     <h4>特色</h4>
     <p>${esc(note.specialties)}</p>
   </section>`;
+}
+
+function renderSpot(spot: Attraction): string {
+  const where = spot.city ? `${fullName(spot.province)} · ${spot.city}` : fullName(spot.province);
+  const grade = spot.grade
+    ? `<p class="grade">公开资料中长期列为国家${esc(spot.grade)}级旅游景区。等级可能调整，不是实时公示。</p>`
+    : "";
+  const season = spot.season ? `<h3>季节</h3><p>${esc(spot.season)}</p>` : "";
+  const caution = spot.caution ? `<h3>注意</h3><p>${esc(spot.caution)}</p>` : "";
+  return `<article class="region-card spot-page">
+    <button type="button" class="text-btn" data-back-region>返回地区卡片</button>
+    <header class="card-head">
+      <p class="eyebrow">${esc(where)} · ${spot.kind === "custom" ? "习俗" : "景点"} · 整理介绍</p>
+      <h2 tabindex="-1">${esc(spot.name)}</h2>
+    </header>
+    ${grade}
+    <h3>背景</h3>
+    <p>${esc(spot.history)}</p>
+    <h3>门票参考</h3>
+    <p>${esc(spot.tickets)}</p>
+    <p class="fine">票价、优惠和预约会变。上面若写了数字，只是整理时见到的公开参考，不是景区当日官价。出发前请在景区官方渠道核对。</p>
+    <h3>怎么逛</h3>
+    <p>${esc(spot.visit)}</p>
+    ${season}
+    ${caution}
+  </article>`;
 }
 
 function renderBars(rows: { name: string; share: number }[], tone: "surname" | "ethnic"): string {
@@ -542,7 +633,7 @@ function regionColumn(province: string, city: string | null, pack: CityFile | nu
     return `<article class="region-card">${head}
       ${solo ? dataNoteHtml() : ""}
       <p class="hint">${esc(unavailableNote(province))}这里不提供可与内地对照的姓氏或民族比例。</p>
-      ${renderCulture(note)}
+      ${renderCulture(note, province, city)}
     </article>`;
   }
   const surnames = city && pack ? topSurnamesAt(pack, city, province) : topSurnames(province);
@@ -557,7 +648,7 @@ function regionColumn(province: string, city: string | null, pack: CityFile | nu
     ${solo ? dataNoteHtml() : ""}
     ${drilledNote}
     ${shareCallout(province, city, pack)}
-    ${renderCulture(note)}
+    ${renderCulture(note, province, city)}
     <h3>常见姓氏</h3>
     <div class="metrics">${renderBars(surnames, "surname")}</div>
     <p class="fine">表内姓氏合计约占 ${esc(formatPct(tracked))}。这是示意数据，不是官方微观数据。</p>
@@ -570,6 +661,18 @@ function regionColumn(province: string, city: string | null, pack: CityFile | nu
 }
 
 function renderDetailSafe() {
+  if (state.spot && state.province) {
+    const spot = attractionById(state.spot);
+    if (spot && spot.province === state.province) {
+      detail.innerHTML = renderSpot(spot);
+      return;
+    }
+    if (!spot && !attractionsLoaded()) {
+      detail.innerHTML = `<article class="region-card"><p class="hint">正在打开景点介绍…</p></article>`;
+      return;
+    }
+    state.spot = null;
+  }
   if (!state.province) {
     detail.innerHTML = `
       <article class="region-card">
@@ -691,6 +794,7 @@ function backToNation() {
   state.level = "nation";
   state.city = null;
   state.cityPack = null;
+  state.spot = null;
   refresh();
 }
 
@@ -708,10 +812,18 @@ async function applyHit(hit: SearchHit) {
     state.queryKind = null;
     state.via = "";
     state.find = hit.commit;
+    state.spot = hit.spot ?? null;
     input.value = hit.commit;
     await goToPlace(hit.province, hit.city ?? null);
+    if (hit.spot) {
+      state.spot = hit.spot;
+      openDrawerIfNarrow();
+      refresh();
+      focusDetail();
+    }
     return;
   }
+  state.spot = null;
   state.find = "";
   state.queryKind = hit.kind;
   state.query = hit.title;
@@ -828,6 +940,7 @@ async function showProvinceLevel() {
     state.level = "nation";
     state.city = null;
     state.find = "";
+    state.spot = null;
     refresh();
     focusDetail();
     return;
@@ -839,13 +952,28 @@ async function showProvinceLevel() {
   }
   state.city = null;
   state.find = "";
+  state.spot = null;
   refresh();
   focusDetail();
 }
 
+const attractionsReady = fetch(`${import.meta.env.BASE_URL}data/attractions.json`)
+  .then((response) => {
+    if (!response.ok) throw new Error("景点介绍加载失败");
+    return response.json() as Promise<{ spots: Attraction[] }>;
+  })
+  .then((file) => {
+    setAttractions(file.spots);
+  });
+
 async function restoreFromUrl() {
   const url = readUrl();
   silenceUrl = true;
+  try {
+    await attractionsReady;
+  } catch {
+    state.error = "景点介绍暂时没有加载";
+  }
   try {
     if (url.query) {
       const resolved = resolveQuery(url.mode, url.query);
@@ -881,7 +1009,11 @@ async function restoreFromUrl() {
       } else city = null;
       state.compare = { province: url.compareProvince, city, pack };
     }
-    if (narrowScreen() && state.province) state.drawerOpen = true;
+    if (url.spot && state.province) {
+      const spot = attractionById(url.spot);
+      state.spot = spot && spot.province === state.province ? spot.id : null;
+    }
+    if (narrowScreen() && (state.province || state.spot)) state.drawerOpen = true;
   } finally {
     silenceUrl = false;
   }
@@ -947,6 +1079,7 @@ form.addEventListener("click", (event) => {
   state.filter = "all";
   state.error = "";
   state.find = "";
+  state.spot = null;
   state.queryKind = kind;
   state.query = name;
   state.via = "";
@@ -962,6 +1095,7 @@ rank.addEventListener("click", (event) => {
   if (provinceButton?.dataset.province) {
     const unit = provinceButton.dataset.province;
     state.find = "";
+    state.spot = null;
     if (state.level === "province") {
       state.city = unit;
       openDrawerIfNarrow();
@@ -988,6 +1122,7 @@ crumbs.addEventListener("click", (event) => {
       state.city = null;
       state.cityPack = null;
       state.find = "";
+      state.spot = null;
       refresh();
       return;
     }
@@ -995,10 +1130,18 @@ crumbs.addEventListener("click", (event) => {
     return;
   }
   if (level === "province") {
+    state.spot = null;
     void showProvinceLevel();
     return;
   }
+  if (level === "spot") {
+    openDrawerIfNarrow();
+    focusDetail();
+    return;
+  }
+  state.spot = null;
   openDrawerIfNarrow();
+  refresh();
   focusDetail();
 });
 
@@ -1057,8 +1200,25 @@ window.addEventListener("hashchange", () => {
 silenceUrl = true;
 refresh();
 
+detail.addEventListener("click", (event) => {
+  const target = event.target as HTMLElement;
+  if (target.closest("[data-back-region]")) {
+    state.spot = null;
+    refresh();
+    focusDetail();
+    return;
+  }
+  const spotButton = target.closest<HTMLButtonElement>("[data-spot]");
+  if (!spotButton?.dataset.spot) return;
+  state.spot = spotButton.dataset.spot;
+  openDrawerIfNarrow();
+  refresh();
+  focusDetail();
+});
+
 mountMap(chartEl, (name) => {
   state.find = "";
+  state.spot = null;
   if (state.level === "province") {
     state.city = name;
     openDrawerIfNarrow();
