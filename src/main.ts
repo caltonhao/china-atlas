@@ -73,6 +73,8 @@ const state: {
   drawerOpen: boolean;
   spot: string | null;
   browse: string | null;
+  browseProvince: string | null;
+  pair: string[];
 } = {
   filter: "all",
   queryKind: null,
@@ -92,7 +94,66 @@ const state: {
   drawerOpen: false,
   spot: null,
   browse: null,
+  browseProvince: null,
+  pair: [],
 };
+
+interface SavedItem {
+  key: string;
+  label: string;
+  province: string;
+  city: string | null;
+  spot: string | null;
+}
+
+const FAV_KEY = "china-atlas-favs";
+const RECENT_KEY = "china-atlas-recent";
+
+function readSaved(key: string): SavedItem[] {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(key) || "[]") as SavedItem[];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeSaved(key: string, items: SavedItem[]) {
+  localStorage.setItem(key, JSON.stringify(items.slice(0, 12)));
+}
+
+function isFav(key: string): boolean {
+  return readSaved(FAV_KEY).some((item) => item.key === key);
+}
+
+function toggleFav(item: SavedItem) {
+  const items = readSaved(FAV_KEY).filter((entry) => entry.key !== item.key);
+  if (!isFav(item.key)) items.unshift(item);
+  writeSaved(FAV_KEY, items);
+}
+
+function rememberView(item: SavedItem | null) {
+  if (!item) return;
+  const items = readSaved(RECENT_KEY).filter((entry) => entry.key !== item.key);
+  items.unshift(item);
+  writeSaved(RECENT_KEY, items);
+}
+
+function viewForSpot(id: string): SavedItem | null {
+  const spot = attractionById(id);
+  if (!spot) return null;
+  return { key: `s:${spot.id}`, label: spot.name, province: spot.province, city: spot.city, spot: spot.id };
+}
+
+function viewForRegion(province: string, city: string | null): SavedItem {
+  return {
+    key: `r:${province}:${city ?? ""}`,
+    label: city || fullName(province),
+    province,
+    city,
+    spot: null,
+  };
+}
 
 let drillToken = 0;
 let composing = false;
@@ -155,6 +216,9 @@ app.innerHTML = `
             <button type="button" data-browse="theme:mountain">看山</button>
             <button type="button" data-browse="theme:heritage">看古建</button>
             <button type="button" data-browse="theme:festival">看节庆</button>
+            <button type="button" data-browse="theme:water">看水景</button>
+            <button type="button" data-browse="theme:town">看古镇</button>
+            <button type="button" data-browse="theme:museum">看博物馆</button>
             <button type="button" data-browse="season:spring">春</button>
             <button type="button" data-browse="season:summer">夏</button>
             <button type="button" data-browse="season:autumn">秋</button>
@@ -178,6 +242,17 @@ app.innerHTML = `
         <span id="drawer-action">展开</span>
       </button>
       <div class="drawer-body" id="drawer-body">
+        <section id="saved" class="card saved-card">
+          <header class="card-head">
+            <p class="eyebrow">本机</p>
+            <h2>收藏和最近看过</h2>
+            <p class="hint">保存在这台浏览器里，不需要账号。</p>
+          </header>
+          <h3>收藏</h3>
+          <div id="fav-list" class="saved-list"></div>
+          <h3>最近看过</h3>
+          <div id="recent-list" class="saved-list"></div>
+        </section>
         <section id="rank" class="card" hidden></section>
         <section id="detail" class="card" tabindex="-1"></section>
         <section id="compare" class="card compare-card">
@@ -262,6 +337,8 @@ function readUrl() {
     compareCity: params.get("bc"),
     spot: params.get("spot"),
     browse: params.get("browse"),
+    browseProvince: params.get("bp"),
+    pair: [params.get("s1"), params.get("s2")].filter((item): item is string => Boolean(item)),
   };
 }
 
@@ -282,6 +359,9 @@ function writeUrl() {
   }
   if (state.spot) params.set("spot", state.spot);
   if (state.browse) params.set("browse", state.browse);
+  if (state.browseProvince) params.set("bp", state.browseProvince);
+  if (state.pair[0]) params.set("s1", state.pair[0]);
+  if (state.pair[1]) params.set("s2", state.pair[1]);
   const current = new URLSearchParams(location.hash.replace(/^#/, ""));
   const keys = new Set([...params.keys(), ...current.keys()]);
   let same = true;
@@ -589,7 +669,7 @@ function renderCulture(note: CultureNote | undefined, province: string, city: st
   </section>`;
 }
 
-function renderSpot(spot: Attraction): string {
+function renderSpot(spot: Attraction, compact = false): string {
   const where = spot.city ? `${fullName(spot.province)} · ${spot.city}` : fullName(spot.province);
   const kindLabel = spot.kind === "custom" ? "习俗" : spot.kind === "specialty" ? "特色" : "景点";
   const historyTitle = spot.kind === "specialty" ? "是什么" : spot.kind === "custom" ? "怎么过" : "背景";
@@ -612,8 +692,16 @@ function renderSpot(spot: Attraction): string {
     ? `<figure class="spot-photo"><img src="${esc(spot.image.src)}" alt="${esc(spot.name)}" loading="lazy" /><figcaption>照片：${esc(spot.image.author)}，${esc(spot.image.license)}。<a href="${esc(spot.image.page)}" target="_blank" rel="noreferrer">维基共享资源原文件</a></figcaption></figure>`
     : "";
   const backLabel = state.browse ? "返回浏览列表" : "返回地区卡片";
+  const fav = viewForSpot(spot.id);
+  const faved = fav ? isFav(fav.key) : false;
+  const inPair = state.pair.includes(spot.id);
   return `<article class="region-card spot-page">
-    <button type="button" class="text-btn" data-back-region>${backLabel}</button>
+    <div class="card-actions">
+      ${compact ? "" : `<button type="button" class="text-btn" data-back-region>${backLabel}</button>`}
+      ${compact ? "" : `<button type="button" class="text-btn" data-copy-link>复制链接</button>`}
+      <button type="button" class="text-btn${faved ? " is-on" : ""}" data-fav-spot="${esc(spot.id)}">${faved ? "已收藏" : "收藏"}</button>
+      <button type="button" class="text-btn" data-pair-add="${esc(spot.id)}">${inPair ? "移出对比" : "加入对比"}</button>
+    </div>
     <header class="card-head">
       <p class="eyebrow">${esc(where)} · ${kindLabel} · 整理介绍</p>
       <h2 tabindex="-1">${esc(spot.name)}</h2>
@@ -634,10 +722,31 @@ function renderSpot(spot: Attraction): string {
   </article>`;
 }
 
+function renderSpotPair(left: Attraction, right: Attraction): string {
+  return `<article class="region-card">
+    <div class="card-actions">
+      <button type="button" class="text-btn" data-clear-pair>退出景点对比</button>
+      <button type="button" class="text-btn" data-copy-link>复制链接</button>
+    </div>
+    <header class="card-head">
+      <p class="eyebrow">介绍对比 · 整理介绍</p>
+      <h2>${esc(left.name)} 与 ${esc(right.name)}</h2>
+      <p class="hint">对照背景、花费、怎么逛和交通。窄屏改成上下排列。</p>
+    </header>
+    <div class="compare-grid">
+      <div class="compare-col">${renderSpot(left, true)}</div>
+      <div class="compare-col">${renderSpot(right, true)}</div>
+    </div>
+  </article>`;
+}
+
 const BROWSE_LABELS: Record<string, string> = {
   mountain: "看山",
   heritage: "看古建",
   festival: "看节庆",
+  water: "看水景",
+  town: "看古镇",
+  museum: "看博物馆",
   spring: "春天",
   summer: "夏天",
   autumn: "秋天",
@@ -647,7 +756,13 @@ const BROWSE_LABELS: Record<string, string> = {
 function renderBrowse(): string {
   if (!state.browse) return "";
   const [mode, id] = state.browse.split(":") as ["theme" | "season", string];
-  const items = browseAttractions(mode, id).slice(0, 40);
+  const matched = browseAttractions(mode, id);
+  const provinces = [...new Set(matched.map((spot) => spot.province))];
+  const filtered = state.browseProvince ? matched.filter((spot) => spot.province === state.browseProvince) : matched;
+  const items = filtered.slice(0, 40);
+  const options = [`<option value="">全部省份</option>`]
+    .concat(provinces.map((province) => `<option value="${esc(province)}"${province === state.browseProvince ? " selected" : ""}>${esc(fullName(province))}</option>`))
+    .join("");
   const rows = items
     .map((spot) => {
       const where = spot.city ? `${fullName(spot.province)} · ${spot.city}` : fullName(spot.province);
@@ -660,9 +775,12 @@ function renderBrowse(): string {
     <header class="card-head">
       <p class="eyebrow">浏览 · 整理</p>
       <h2>${esc(BROWSE_LABELS[id] ?? id)}</h2>
-      <p class="hint">只列出名称或季节说明对得上的条目，不是官方主题名录。点一条打开介绍。</p>
+      <p class="hint">只列出名称或季节说明对得上的条目，不是官方主题名录。可以用省份缩小范围，点一条打开介绍。</p>
     </header>
-    <div class="browse-list">${rows || `<p class="fine">这一类还没有收进清单。</p>`}</div>
+    <label class="browse-filter">省份
+      <select data-browse-province>${options}</select>
+    </label>
+    <div class="browse-list">${rows || `<p class="fine">这一类在当前省份还没有收进清单。</p>`}</div>
   </section>`;
 }
 
@@ -700,7 +818,15 @@ function regionColumn(province: string, city: string | null, pack: CityFile | nu
   const title = city ?? fullName(province);
   const eyebrow = city ? `${fullName(province)} · 地区卡片` : "地区卡片";
   const note = city ? cultureForCity(province, city) : cultureForProvince(province);
-  const head = `<header class="card-head">
+  const regionView = viewForRegion(province, city);
+  const regionFaved = isFav(regionView.key);
+  const actions = solo
+    ? `<div class="card-actions">
+        <button type="button" class="text-btn" data-copy-link>复制链接</button>
+        <button type="button" class="text-btn${regionFaved ? " is-on" : ""}" data-fav-region="${esc(province)}" data-fav-city="${esc(city ?? "")}">${regionFaved ? "已收藏" : "收藏此地"}</button>
+      </div>`
+    : "";
+  const head = `${actions}<header class="card-head">
       <p class="eyebrow">${esc(eyebrow)}</p>
       <h2 tabindex="-1">${esc(title)}</h2>
       ${solo && !city ? `<p class="hint">${esc(isUnavailable(province) ? unavailableNote(province) : provinceBlurb(province))}</p>` : ""}
@@ -737,7 +863,32 @@ function regionColumn(province: string, city: string | null, pack: CityFile | nu
   </article>`;
 }
 
+function renderSavedLists() {
+  const favList = document.querySelector<HTMLElement>("#fav-list");
+  const recentList = document.querySelector<HTMLElement>("#recent-list");
+  if (!favList || !recentList) return;
+  const paint = (items: SavedItem[], empty: string) =>
+    items.length
+      ? items
+          .map(
+            (item) =>
+              `<button type="button" class="saved-row" data-open-province="${esc(item.province)}" data-open-city="${esc(item.city ?? "")}" data-open-spot="${esc(item.spot ?? "")}"><span>${esc(item.label)}</span></button>`,
+          )
+          .join("")
+      : `<p class="fine">${empty}</p>`;
+  favList.innerHTML = paint(readSaved(FAV_KEY), "还没有收藏。");
+  recentList.innerHTML = paint(readSaved(RECENT_KEY), "打开地区或介绍后会出现在这里。");
+}
+
 function renderDetailSafe() {
+  if (state.pair.length === 2 && attractionsLoaded()) {
+    const left = attractionById(state.pair[0]);
+    const right = attractionById(state.pair[1]);
+    if (left && right) {
+      detail.innerHTML = renderSpotPair(left, right);
+      return;
+    }
+  }
   if (state.spot && state.province) {
     const spot = attractionById(state.spot);
     if (spot && spot.province === state.province) {
@@ -786,6 +937,7 @@ function renderDetailSafe() {
 }
 
 function refresh() {
+  renderSavedLists();
   renderChrome();
   renderLegend();
   renderRank();
@@ -854,6 +1006,7 @@ async function goToPlace(province: string, city: string | null) {
     openDrawerIfNarrow();
     refresh();
     focusDetail();
+    if (state.province) rememberView(state.spot ? viewForSpot(state.spot) : viewForRegion(state.province, state.city));
     return;
   }
   if (state.level !== "province" || state.province !== province || !state.cityPack) {
@@ -864,6 +1017,7 @@ async function goToPlace(province: string, city: string | null) {
   openDrawerIfNarrow();
   refresh();
   focusDetail();
+  if (state.province) rememberView(state.spot ? viewForSpot(state.spot) : viewForRegion(state.province, state.city));
 }
 
 function backToNation() {
@@ -1087,6 +1241,8 @@ async function restoreFromUrl() {
       state.compare = { province: url.compareProvince, city, pack };
     }
     if (url.browse && /^(theme|season):/.test(url.browse)) state.browse = url.browse;
+    if (url.browseProvince) state.browseProvince = url.browseProvince;
+    state.pair = url.pair.filter((id) => Boolean(attractionById(id))).slice(0, 2);
     if (url.spot && state.province) {
       const spot = attractionById(url.spot);
       state.spot = spot && spot.province === state.province ? spot.id : null;
@@ -1095,6 +1251,8 @@ async function restoreFromUrl() {
   } finally {
     silenceUrl = false;
   }
+  if (state.spot) rememberView(viewForSpot(state.spot));
+  else if (state.province) rememberView(viewForRegion(state.province, state.city));
   refresh();
 }
 
@@ -1286,6 +1444,50 @@ detail.addEventListener("click", (event) => {
     focusDetail();
     return;
   }
+  const copyButton = target.closest<HTMLButtonElement>("[data-copy-link]");
+  if (copyButton) {
+    const original = "复制链接";
+    navigator.clipboard
+      .writeText(location.href)
+      .then(() => {
+        copyButton.textContent = "已复制";
+      })
+      .catch(() => {
+        copyButton.textContent = "复制失败";
+      })
+      .finally(() => {
+        window.setTimeout(() => {
+          copyButton.textContent = original;
+        }, 1600);
+      });
+    return;
+  }
+  const favSpot = target.closest<HTMLButtonElement>("[data-fav-spot]");
+  if (favSpot?.dataset.favSpot) {
+    const item = viewForSpot(favSpot.dataset.favSpot);
+    if (item) toggleFav(item);
+    refresh();
+    return;
+  }
+  const favRegion = target.closest<HTMLButtonElement>("[data-fav-region]");
+  if (favRegion?.dataset.favRegion) {
+    toggleFav(viewForRegion(favRegion.dataset.favRegion, favRegion.dataset.favCity || null));
+    refresh();
+    return;
+  }
+  const pairAdd = target.closest<HTMLButtonElement>("[data-pair-add]");
+  if (pairAdd?.dataset.pairAdd) {
+    const id = pairAdd.dataset.pairAdd;
+    if (state.pair.includes(id)) state.pair = state.pair.filter((item) => item !== id);
+    else state.pair = [...state.pair, id].slice(-2);
+    refresh();
+    return;
+  }
+  if (target.closest("[data-clear-pair]")) {
+    state.pair = [];
+    refresh();
+    return;
+  }
   const spotButton = target.closest<HTMLButtonElement>("[data-spot]");
   if (!spotButton?.dataset.spot) return;
   const nextSpot = spotButton.dataset.spot;
@@ -1306,11 +1508,34 @@ detail.addEventListener("click", (event) => {
   focusDetail();
 });
 
+detail.addEventListener("change", (event) => {
+  const select = (event.target as HTMLElement).closest<HTMLSelectElement>("[data-browse-province]");
+  if (!select) return;
+  state.browseProvince = select.value || null;
+  refresh();
+});
+
+document.querySelector("#saved")?.addEventListener("click", (event) => {
+  const button = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-open-province]");
+  if (!button?.dataset.openProvince) return;
+  const province = button.dataset.openProvince;
+  const city = button.dataset.openCity || null;
+  const spot = button.dataset.openSpot || null;
+  state.spot = spot;
+  void goToPlace(province, city).then(() => {
+    state.spot = spot;
+    openDrawerIfNarrow();
+    refresh();
+    focusDetail();
+  });
+});
+
 document.querySelector("#browse")?.addEventListener("click", (event) => {
   const button = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-browse]");
   if (!button?.dataset.browse) return;
   state.browse = state.browse === button.dataset.browse ? null : button.dataset.browse;
   state.spot = null;
+  state.pair = [];
   openDrawerIfNarrow();
   refresh();
 });

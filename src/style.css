@@ -485,6 +485,46 @@ input[type="search"]::-webkit-search-cancel-button { appearance: none; }
 
 .browse-card { margin-bottom: 12px; }
 
+.browse-filter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  color: var(--ink-soft);
+  font-size: 13px;
+}
+
+.browse-filter select {
+  min-height: 34px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fffdf9;
+  padding: 0 8px;
+}
+
+.card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.card-actions .is-on { color: var(--cinnabar-deep); font-weight: 650; }
+
+.saved-card h3 { margin-top: 12px; }
+
+.saved-list { display: flex; flex-direction: column; gap: 6px; }
+
+.saved-row {
+  width: 100%;
+  min-height: 34px;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 8px;
+  background: rgba(30, 58, 95, 0.05);
+  text-align: left;
+}
+
 .browse-list { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
 
 .browse-row {

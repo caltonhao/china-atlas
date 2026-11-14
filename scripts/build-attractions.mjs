@@ -461,7 +461,16 @@ function inferThemes(spot) {
   const themes = [];
   if (spot.kind === "custom") themes.push("festival");
   if (spot.kind === "sight" && /山|峰|岳|峡|岭|崖|长城|雪山/.test(spot.name)) themes.push("mountain");
-  if (spot.kind === "sight" && /寺|庙|塔|陵|古城|古镇|石窟|长城|府|阁|园林|牌坊|故居|博物馆|宫|楼|园/.test(spot.name)) themes.push("heritage");
+  if (spot.kind === "sight" && /湖|江|海|岛|瀑|湾|泉|潭|溪/.test(spot.name)) themes.push("water");
+  if (spot.kind === "sight" && /古城|古镇|周庄|乌镇|同里/.test(spot.name)) themes.push("town");
+  if (spot.kind === "sight" && /博物馆|纪念馆/.test(spot.name)) themes.push("museum");
+  if (
+    spot.kind === "sight" &&
+    !/博物馆|纪念馆/.test(spot.name) &&
+    /寺|庙|塔|陵|古城|古镇|石窟|长城|府|阁|园林|牌坊|故居|宫|楼|园/.test(spot.name)
+  ) {
+    themes.push("heritage");
+  }
   return themes;
 }
 
@@ -498,6 +507,15 @@ const LINKS = {
   "甘肃-莫高窟": [{ label: "官方网站", href: "https://www.dha.ac.cn/" }],
   "四川-九寨沟": [{ label: "官方网站", href: "https://www.jiuzhai.com/" }],
   "安徽-黄山": [{ label: "景区网站", href: "https://www.huangshan.com.cn/" }],
+  "四川-青城山": [{ label: "都江堰景区网站", href: "https://www.djy517.com/" }],
+  "上海-上海博物馆": [{ label: "官方网站", href: "https://www.shanghaimuseum.net/" }],
+  "北京-中国国家博物馆": [{ label: "官方网站", href: "https://www.chnmuseum.cn/" }],
+  "江苏-苏州博物馆": [{ label: "官方网站", href: "https://www.szmuseum.com/" }],
+  "北京-首都博物馆": [{ label: "官方网站", href: "https://www.capitalmuseum.org.cn/" }],
+  "四川-三星堆博物馆": [{ label: "官方网站", href: "https://www.sxd.cn/" }],
+  "四川-四川博物院": [{ label: "官方网站", href: "https://www.scmuseum.cn/" }],
+  "云南-云南省博物馆": [{ label: "官方网站", href: "https://www.ynmuseum.org/" }],
+  "陕西-陕西历史博物馆": [{ label: "官方网站", href: "https://www.sxhm.com/" }],
   "香港-维多利亚港": [{ label: "官方旅游资讯", href: "https://www.discoverhongkong.com/" }],
   "香港-太平山": [{ label: "官方旅游资讯", href: "https://www.discoverhongkong.com/" }],
   "澳门-大三巴": [{ label: "官方旅游资讯", href: "https://www.macaotourism.gov.mo/" }],
@@ -543,6 +561,54 @@ const IMAGES = {
     page: "https://commons.wikimedia.org/wiki/File:1_li_jiang_guilin_yangshuo_2011.jpg",
     author: "chensiyuan",
     license: "CC BY-SA 4.0",
+  },
+  "四川-九寨沟": {
+    src: "https://upload.wikimedia.org/wikipedia/commons/thumb/a/a9/Jiuzhaigou_Sichuan_China_Panda-Lake-01.jpg/960px-Jiuzhaigou_Sichuan_China_Panda-Lake-01.jpg",
+    page: "https://commons.wikimedia.org/wiki/File:Jiuzhaigou_Sichuan_China_Panda-Lake-01.jpg",
+    author: "CEphoto, Uwe Aranas",
+    license: "CC BY-SA 3.0",
+  },
+  "四川-峨眉山": {
+    src: "https://upload.wikimedia.org/wikipedia/commons/thumb/8/83/China_-_Mount_Emei_-_EmeiShan_-_Sichuan_01.jpg/960px-China_-_Mount_Emei_-_EmeiShan_-_Sichuan_01.jpg",
+    page: "https://commons.wikimedia.org/wiki/File:China_-_Mount_Emei_-_EmeiShan_-_Sichuan_01.jpg",
+    author: "Vanvelthem Cédric",
+    license: "CC BY-SA 4.0",
+  },
+  "云南-丽江古城": {
+    src: "https://upload.wikimedia.org/wikipedia/commons/thumb/7/74/1_lijiang_old_town_night.jpg/960px-1_lijiang_old_town_night.jpg",
+    page: "https://commons.wikimedia.org/wiki/File:1_lijiang_old_town_night.jpg",
+    author: "chensiyuan",
+    license: "CC BY-SA 4.0",
+  },
+  "福建-鼓浪屿": {
+    src: "https://upload.wikimedia.org/wikipedia/commons/thumb/b/b6/Gulangyu_Island_from_Zhongshan_Road%2C_Xiamen.jpg/960px-Gulangyu_Island_from_Zhongshan_Road%2C_Xiamen.jpg",
+    page: "https://commons.wikimedia.org/wiki/File:Gulangyu_Island_from_Zhongshan_Road,_Xiamen.jpg",
+    author: "Slyronit",
+    license: "CC BY-SA 4.0",
+  },
+  "湖南-武陵源": {
+    src: "https://upload.wikimedia.org/wikipedia/commons/thumb/a/af/Pilier_rocheux_couronn%C3%A9_de_pins%2C_monts_Tianzi_%282026%29.jpg/960px-Pilier_rocheux_couronn%C3%A9_de_pins%2C_monts_Tianzi_%282026%29.jpg",
+    page: "https://commons.wikimedia.org/wiki/File:Pilier_rocheux_couronn%C3%A9_de_pins,_monts_Tianzi_(2026).jpg",
+    author: "ICOLEF",
+    license: "CC BY-SA 4.0",
+  },
+  "江苏-拙政园": {
+    src: "https://upload.wikimedia.org/wikipedia/commons/thumb/f/f5/Humble_Administrator%27s_Garden_Suzhou_November_2017_005.jpg/960px-Humble_Administrator%27s_Garden_Suzhou_November_2017_005.jpg",
+    page: "https://commons.wikimedia.org/wiki/File:Humble_Administrator%27s_Garden_Suzhou_November_2017_005.jpg",
+    author: "King of Hearts",
+    license: "CC BY-SA 4.0",
+  },
+  "青海-青海湖": {
+    src: "https://upload.wikimedia.org/wikipedia/commons/thumb/f/fd/202606_Qinghai_Lake_04.jpg/960px-202606_Qinghai_Lake_04.jpg",
+    page: "https://commons.wikimedia.org/wiki/File:202606_Qinghai_Lake_04.jpg",
+    author: "Jonashtand",
+    license: "CC BY-SA 4.0",
+  },
+  "四川-乐山大佛": {
+    src: "https://upload.wikimedia.org/wikipedia/commons/thumb/4/4b/Leshan_Giant_Buddha%2C_20161102.jpg/960px-Leshan_Giant_Buddha%2C_20161102.jpg",
+    page: "https://commons.wikimedia.org/wiki/File:Leshan_Giant_Buddha,_20161102.jpg",
+    author: "王计",
+    license: "CC BY 2.5",
   },
 };
 
