@@ -108,6 +108,25 @@ interface SavedItem {
 
 const FAV_KEY = "china-atlas-favs";
 const RECENT_KEY = "china-atlas-recent";
+const PLAN_KEY = "china-atlas-plan";
+
+interface PlanDay {
+  items: SavedItem[];
+}
+
+function readPlan(): PlanDay[] {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(PLAN_KEY) || "[]") as PlanDay[];
+    if (!Array.isArray(parsed) || parsed.length === 0) return [{ items: [] }];
+    return parsed.map((day) => ({ items: Array.isArray(day.items) ? day.items : [] }));
+  } catch {
+    return [{ items: [] }];
+  }
+}
+
+function writePlan(days: PlanDay[]) {
+  localStorage.setItem(PLAN_KEY, JSON.stringify(days.length ? days : [{ items: [] }]));
+}
 
 function readSaved(key: string): SavedItem[] {
   try {
@@ -252,6 +271,13 @@ app.innerHTML = `
           <div id="fav-list" class="saved-list"></div>
           <h3>最近看过</h3>
           <div id="recent-list" class="saved-list"></div>
+          <h3>行程草稿</h3>
+          <p class="fine">从收藏放进来，按天排列。这是个人草稿，不是可预订行程，也不含实时交通和酒店。</p>
+          <div id="plan-list" class="saved-list"></div>
+          <div class="card-actions">
+            <button type="button" id="plan-add-day" class="text-btn">加一天</button>
+            <button type="button" id="plan-copy" class="text-btn">复制草稿</button>
+          </div>
         </section>
         <section id="rank" class="card" hidden></section>
         <section id="detail" class="card" tabindex="-1"></section>
@@ -277,6 +303,7 @@ app.innerHTML = `
     <p>地图使用阿里云 DataV GeoAtlas 公开边界：全国为省级，下钻后为地级市、自治州、地区、盟，直辖市为市辖区，海南含省直辖县。香港、澳门和台湾暂无同口径的姓氏民族数据，仍可查看地方介绍。南海诸岛界线只作底图示意。</p>
   </footer>
   <div id="live" class="sr-only" aria-live="polite"></div>
+  <section id="print-sheet" class="print-sheet" hidden></section>
 `;
 
 const quickSurnames = document.querySelector<HTMLElement>("#quick-surnames")!;
@@ -824,6 +851,7 @@ function regionColumn(province: string, city: string | null, pack: CityFile | nu
     ? `<div class="card-actions">
         <button type="button" class="text-btn" data-copy-link>复制链接</button>
         <button type="button" class="text-btn${regionFaved ? " is-on" : ""}" data-fav-region="${esc(province)}" data-fav-city="${esc(city ?? "")}">${regionFaved ? "已收藏" : "收藏此地"}</button>
+        <button type="button" class="text-btn" data-print-card>打印或导出</button>
       </div>`
     : "";
   const head = `${actions}<header class="card-head">
@@ -876,8 +904,32 @@ function renderSavedLists() {
           )
           .join("")
       : `<p class="fine">${empty}</p>`;
-  favList.innerHTML = paint(readSaved(FAV_KEY), "还没有收藏。");
+  favList.innerHTML = readSaved(FAV_KEY).length
+    ? readSaved(FAV_KEY)
+        .map(
+          (item) =>
+            `<div class="saved-line"><button type="button" class="saved-row" data-open-province="${esc(item.province)}" data-open-city="${esc(item.city ?? "")}" data-open-spot="${esc(item.spot ?? "")}"><span>${esc(item.label)}</span></button><button type="button" class="text-btn" data-plan-add="${esc(item.key)}">放入草稿</button></div>`,
+        )
+        .join("")
+    : `<p class="fine">还没有收藏。</p>`;
   recentList.innerHTML = paint(readSaved(RECENT_KEY), "打开地区或介绍后会出现在这里。");
+  const planList = document.querySelector<HTMLElement>("#plan-list");
+  if (planList) {
+    const days = readPlan();
+    planList.innerHTML = days
+      .map((day, dayIndex) => {
+        const rows = day.items.length
+          ? day.items
+              .map(
+                (item, itemIndex) =>
+                  `<div class="saved-line"><button type="button" class="saved-row" data-open-province="${esc(item.province)}" data-open-city="${esc(item.city ?? "")}" data-open-spot="${esc(item.spot ?? "")}"><span>${esc(item.label)}</span></button><button type="button" class="text-btn" data-plan-remove="${dayIndex}:${itemIndex}">移出</button></div>`,
+              )
+              .join("")
+          : `<p class="fine">这一天还是空的。</p>`;
+        return `<section class="plan-day"><h4>第${dayIndex + 1}天</h4>${rows}</section>`;
+      })
+      .join("");
+  }
 }
 
 function renderDetailSafe() {
@@ -1031,6 +1083,58 @@ function backToNation() {
 
 function focusDetail() {
   detail.querySelector<HTMLElement>("h2")?.focus();
+}
+
+function printCardText(province: string, city: string | null): string {
+  const title = city ?? fullName(province);
+  const note = city ? cultureForCity(province, city) : cultureForProvince(province);
+  const lines = [
+    `${title} · 图鉴整理`,
+    "这不是官方公报或旅游名录。",
+    "示意数据。姓氏和民族比例是按公开排行和区域格局整理的示意图，不是户籍登记，也不是人口普查公报。",
+    "整理介绍。习俗、景点、特色是公开地方常识写成的短文，不是文化和旅游部门公布的名录。",
+    "",
+    "习俗",
+    note?.customs ?? "暂无",
+    "",
+    "景点",
+    note?.sights ?? "暂无",
+    "",
+    "特色",
+    note?.specialties ?? "暂无",
+    "",
+  ];
+  if (!isUnavailable(province)) {
+    const surnames = city && state.cityPack && state.province === province ? topSurnamesAt(state.cityPack, city, province) : topSurnames(province);
+    const ethnic = city && state.cityPack && state.province === province ? ethnicCompositionAt(state.cityPack, city, province) : ethnicComposition(province);
+    lines.push("常见姓氏（示意）");
+    lines.push(surnames.map((row) => `${row.name} ${formatPct(row.share)}`).join("、"));
+    lines.push("");
+    lines.push("民族构成（示意）");
+    lines.push(ethnic.map((row) => `${row.name} ${formatPct(row.share)}`).join("、"));
+    lines.push("");
+  } else {
+    lines.push(unavailableNote(province));
+    lines.push("");
+  }
+  const spots = attractionsFor(province, city).slice(0, 8);
+  if (spots.length) {
+    lines.push("可打开的介绍");
+    for (const spot of spots) lines.push(`- ${spot.name}：${spot.history.slice(0, 80)}`);
+  }
+  return lines.join("\n");
+}
+
+function fillPrintSheet(province: string, city: string | null) {
+  const sheet = document.querySelector<HTMLElement>("#print-sheet");
+  if (!sheet) return;
+  const title = city ?? fullName(province);
+  const text = printCardText(province, city);
+  sheet.innerHTML = text
+    .split("\n")
+    .map((line) => (line ? `<p>${esc(line)}</p>` : "<br />"))
+    .join("");
+  sheet.insertAdjacentHTML("afterbegin", `<h1>${esc(title)}</h1>`);
 }
 
 async function applyHit(hit: SearchHit) {
@@ -1188,22 +1292,30 @@ async function showProvinceLevel() {
   focusDetail();
 }
 
-const attractionsReady = fetch(`${import.meta.env.BASE_URL}data/attractions.json`)
-  .then((response) => {
-    if (!response.ok) throw new Error("景点介绍加载失败");
-    return response.json() as Promise<{ spots: Attraction[]; hubs?: Record<string, string> }>;
-  })
-  .then((file) => {
-    setAttractions(file.spots, file.hubs ?? {});
-  });
+let attractionsReady: Promise<void> | null = null;
+function loadAttractions(): Promise<void> {
+  if (!attractionsReady) {
+    attractionsReady = fetch(`${import.meta.env.BASE_URL}data/attractions.json`)
+      .then((response) => {
+        if (!response.ok) throw new Error("景点介绍加载失败");
+        return response.json() as Promise<{ spots: Attraction[]; hubs?: Record<string, string> }>;
+      })
+      .then((file) => {
+        setAttractions(file.spots, file.hubs ?? {});
+      });
+  }
+  return attractionsReady;
+}
 
 async function restoreFromUrl() {
   const url = readUrl();
   silenceUrl = true;
-  try {
-    await attractionsReady;
-  } catch {
-    state.error = "景点介绍暂时没有加载";
+  if (url.spot || url.browse || url.pair.length) {
+    try {
+      await loadAttractions();
+    } catch {
+      state.error = "景点介绍暂时没有加载";
+    }
   }
   try {
     if (url.query) {
@@ -1271,6 +1383,11 @@ input.addEventListener("compositionend", () => {
 });
 input.addEventListener("input", () => {
   if (composing) return;
+  if (!attractionsLoaded()) {
+    void loadAttractions().then(() => {
+      if (input.value.trim()) renderSuggestions();
+    });
+  }
   tryLiveApply();
 });
 input.addEventListener("keydown", (event) => {
@@ -1475,6 +1592,19 @@ detail.addEventListener("click", (event) => {
     refresh();
     return;
   }
+  if (target.closest("[data-print-card]") && state.province) {
+    const text = printCardText(state.province, state.city);
+    fillPrintSheet(state.province, state.city);
+    const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+    const link = document.createElement("a");
+    const title = state.city ?? fullName(state.province);
+    link.href = URL.createObjectURL(blob);
+    link.download = `${title}-图鉴整理.txt`;
+    link.click();
+    URL.revokeObjectURL(link.href);
+    window.print();
+    return;
+  }
   const pairAdd = target.closest<HTMLButtonElement>("[data-pair-add]");
   if (pairAdd?.dataset.pairAdd) {
     const id = pairAdd.dataset.pairAdd;
@@ -1515,7 +1645,50 @@ detail.addEventListener("change", (event) => {
   refresh();
 });
 
+document.querySelector("#plan-add-day")?.addEventListener("click", () => {
+  const days = readPlan();
+  days.push({ items: [] });
+  writePlan(days);
+  renderSavedLists();
+});
+document.querySelector("#plan-copy")?.addEventListener("click", async (event) => {
+  const button = event.currentTarget as HTMLButtonElement;
+  const days = readPlan();
+  const text = [
+    "行程草稿",
+    "整理，不是可预订行程，不含实时交通和酒店。",
+    ...days.map((day, index) => `第${index + 1}天：${day.items.map((item) => item.label).join("、") || "（空）"}`),
+  ].join("\n");
+  try {
+    await navigator.clipboard.writeText(text);
+    button.textContent = "已复制";
+  } catch {
+    button.textContent = "复制失败";
+  }
+  window.setTimeout(() => {
+    button.textContent = "复制草稿";
+  }, 1600);
+});
 document.querySelector("#saved")?.addEventListener("click", (event) => {
+  const planAdd = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-plan-add]");
+  if (planAdd?.dataset.planAdd) {
+    const item = readSaved(FAV_KEY).find((entry) => entry.key === planAdd.dataset.planAdd);
+    if (!item) return;
+    const days = readPlan();
+    days[days.length - 1].items.push(item);
+    writePlan(days);
+    renderSavedLists();
+    return;
+  }
+  const planRemove = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-plan-remove]");
+  if (planRemove?.dataset.planRemove) {
+    const [dayText, itemText] = planRemove.dataset.planRemove.split(":");
+    const days = readPlan();
+    days[Number(dayText)]?.items.splice(Number(itemText), 1);
+    writePlan(days);
+    renderSavedLists();
+    return;
+  }
   const button = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-open-province]");
   if (!button?.dataset.openProvince) return;
   const province = button.dataset.openProvince;
@@ -1556,6 +1729,12 @@ mountMap(chartEl, (name) => {
     atlas = map;
     chartStatus.hidden = true;
     await restoreFromUrl();
+    if (!/spot=|browse=|s1=|s2=/.test(location.hash)) {
+      const start = window.requestIdleCallback ?? ((fn: IdleRequestCallback) => window.setTimeout(() => fn({} as IdleDeadline), 500));
+      start(() => {
+        void loadAttractions();
+      });
+    }
   })
   .catch((error: unknown) => {
     chartStatus.hidden = false;
