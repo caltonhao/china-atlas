@@ -564,6 +564,18 @@ export interface AttractionPlace {
   city: string | null;
 }
 
+export interface AttractionLink {
+  label: string;
+  href: string;
+}
+
+export interface AttractionImage {
+  src: string;
+  page: string;
+  author: string;
+  license: string;
+}
+
 export interface Attraction {
   id: string;
   name: string;
@@ -571,7 +583,7 @@ export interface Attraction {
   province: string;
   city: string | null;
   places: AttractionPlace[];
-  kind: "sight" | "custom";
+  kind: "sight" | "custom" | "specialty";
   grade: "5A" | "4A" | null;
   depth: "full" | "short";
   history: string;
@@ -579,12 +591,34 @@ export interface Attraction {
   visit: string;
   season: string;
   caution: string;
+  access?: string;
+  themes?: string[];
+  seasons?: string[];
+  links?: AttractionLink[];
+  image?: AttractionImage;
 }
 
 let attractionList: Attraction[] = [];
+let hubs: Record<string, string> = {};
 
-export function setAttractions(list: Attraction[]) {
+export function setAttractions(list: Attraction[], nextHubs: Record<string, string> = {}) {
   attractionList = list;
+  hubs = nextHubs;
+}
+
+export function hubFor(province: string): string {
+  return hubs[province] ?? "";
+}
+
+export function browseAttractions(mode: "theme" | "season", id: string): Attraction[] {
+  return attractionList
+    .filter((item) => (mode === "theme" ? item.themes?.includes(id) : item.seasons?.includes(id)))
+    .sort(
+    (a, b) =>
+      Number(b.grade === "5A") - Number(a.grade === "5A") ||
+      Number(a.depth !== "full") - Number(b.depth !== "full") ||
+      a.name.localeCompare(b.name, "zh"),
+  );
 }
 
 export function attractionById(id: string): Attraction | undefined {
@@ -607,7 +641,8 @@ export function attractionsFor(province: string, city: string | null): Attractio
     .filter((item) => item.kind === "sight")
     .sort((a, b) => Number(a.depth !== "full") - Number(b.depth !== "full") || Number(a.grade !== "5A") - Number(b.grade !== "5A"));
   const customs = list.filter((item) => item.kind === "custom");
-  return [...sights.slice(0, 8), ...customs.slice(0, 2)];
+  const specialties = list.filter((item) => item.kind === "specialty");
+  return [...sights.slice(0, 6), ...customs.slice(0, 3), ...specialties.slice(0, 4)];
 }
 
 function spotHits(query: string): SearchHit[] {
@@ -623,7 +658,8 @@ function spotHits(query: string): SearchHit[] {
     }
     if (score < 0) continue;
     const where = spot.city ? `${fullName(spot.province)} · ${spot.city}` : fullName(spot.province);
-    const kindLabel = spot.kind === "custom" ? "习俗" : spot.grade ? `景点 · 国家${spot.grade}级` : "景点";
+    const kindLabel =
+      spot.kind === "custom" ? "习俗" : spot.kind === "specialty" ? "特色" : spot.grade ? `景点 · 国家${spot.grade}级` : "景点";
     hits.push({
       kind: "place",
       title: spot.name,
@@ -631,7 +667,7 @@ function spotHits(query: string): SearchHit[] {
       commit: spot.name,
       province: spot.province,
       city: spot.city,
-      facet: spot.kind === "custom" ? "习俗" : "景点",
+      facet: spot.kind === "custom" ? "习俗" : spot.kind === "specialty" ? "特色" : "景点",
       score,
       spot: spot.id,
     });

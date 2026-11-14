@@ -29,6 +29,8 @@ import {
   attractionsFor,
   attractionsInProvince,
   attractionsLoaded,
+  browseAttractions,
+  hubFor,
   type Attraction,
   rankCities,
   rankProvinces,
@@ -70,6 +72,7 @@ const state: {
   booted: boolean;
   drawerOpen: boolean;
   spot: string | null;
+  browse: string | null;
 } = {
   filter: "all",
   queryKind: null,
@@ -88,6 +91,7 @@ const state: {
   booted: false,
   drawerOpen: false,
   spot: null,
+  browse: null,
 };
 
 let drillToken = 0;
@@ -146,6 +150,16 @@ app.innerHTML = `
             <button type="button" id="back-nation" hidden>返回全国</button>
           </div>
           <h2 id="map-title">省级地图</h2>
+          <div class="browse" id="browse" aria-label="按主题或季节浏览">
+            <span>浏览</span>
+            <button type="button" data-browse="theme:mountain">看山</button>
+            <button type="button" data-browse="theme:heritage">看古建</button>
+            <button type="button" data-browse="theme:festival">看节庆</button>
+            <button type="button" data-browse="season:spring">春</button>
+            <button type="button" data-browse="season:summer">夏</button>
+            <button type="button" data-browse="season:autumn">秋</button>
+            <button type="button" data-browse="season:winter">冬</button>
+          </div>
         </div>
         <p id="map-status">可拖拽、滚轮缩放。点击省份进入地级地图。灰色表示暂无同口径数据。</p>
       </div>
@@ -247,6 +261,7 @@ function readUrl() {
     compareProvince: params.get("b"),
     compareCity: params.get("bc"),
     spot: params.get("spot"),
+    browse: params.get("browse"),
   };
 }
 
@@ -266,6 +281,7 @@ function writeUrl() {
     if (state.compare.city) params.set("bc", state.compare.city);
   }
   if (state.spot) params.set("spot", state.spot);
+  if (state.browse) params.set("browse", state.browse);
   const current = new URLSearchParams(location.hash.replace(/^#/, ""));
   const keys = new Set([...params.keys(), ...current.keys()]);
   let same = true;
@@ -366,6 +382,9 @@ function renderChrome() {
   drawerAction.textContent = state.drawerOpen ? "收起" : "展开";
   drawerToggle.setAttribute("aria-expanded", String(state.drawerOpen));
   side.classList.toggle("is-open", state.drawerOpen);
+  for (const button of document.querySelectorAll<HTMLButtonElement>("[data-browse]")) {
+    button.classList.toggle("is-on", button.dataset.browse === state.browse);
+  }
   layout.classList.toggle("has-compare", Boolean(state.compare));
 
   const primary = state.city ?? (state.province ? fullName(state.province) : "");
@@ -549,6 +568,11 @@ function renderCulture(note: CultureNote | undefined, province: string, city: st
   const linkable = attractionsInProvince(province);
   const customs = shown.filter((spot) => spot.kind === "custom");
   const sights = shown.filter((spot) => spot.kind === "sight");
+  const specialties = shown.filter((spot) => spot.kind === "specialty");
+  const hub = hubFor(province);
+  const transport = hub
+    ? `<h4>交通</h4><p>${city ? `到${esc(city)}，一般先进入${esc(fullName(province))}。` : ""}${esc(hub)}具体班次和景区接驳不在这里列。</p><p class="fine">整理说明，不是铁路、民航或景区时刻表。出发前核对官方或承运人信息。</p>`
+    : "";
   return `<section class="culture">
     <h3>地方介绍</h3>
     <h4>习俗</h4>
@@ -556,37 +580,90 @@ function renderCulture(note: CultureNote | undefined, province: string, city: st
     ${spotButtons(customs)}
     <h4>景点</h4>
     <p>${linkSpotText(note.sights, linkable.filter((spot) => spot.kind === "sight"))}</p>
-    <p class="fine">点景点名打开单独介绍。有国家A级的会标明，等级以最新公示为准。</p>
+    <p class="fine">点名字打开单独介绍。有国家A级的会标明，等级以最新公示为准。</p>
     ${spotButtons(sights)}
     <h4>特色</h4>
-    <p>${esc(note.specialties)}</p>
+    <p>${linkSpotText(note.specialties, linkable.filter((spot) => spot.kind === "specialty"))}</p>
+    ${spotButtons(specialties)}
+    ${transport}
   </section>`;
 }
 
 function renderSpot(spot: Attraction): string {
   const where = spot.city ? `${fullName(spot.province)} · ${spot.city}` : fullName(spot.province);
+  const kindLabel = spot.kind === "custom" ? "习俗" : spot.kind === "specialty" ? "特色" : "景点";
+  const historyTitle = spot.kind === "specialty" ? "是什么" : spot.kind === "custom" ? "怎么过" : "背景";
+  const ticketTitle = spot.kind === "specialty" ? "花费" : spot.kind === "custom" ? "要不要门票" : "门票参考";
+  const visitTitle = spot.kind === "specialty" ? "怎么认" : spot.kind === "custom" ? "什么时候去看" : "怎么逛";
   const grade = spot.grade
     ? `<p class="grade">公开资料中长期列为国家${esc(spot.grade)}级旅游景区。等级可能调整，不是实时公示。</p>`
     : "";
   const season = spot.season ? `<h3>季节</h3><p>${esc(spot.season)}</p>` : "";
   const caution = spot.caution ? `<h3>注意</h3><p>${esc(spot.caution)}</p>` : "";
+  const access = spot.access
+    ? `<h3>交通</h3><p>${esc(spot.access)}</p><p class="fine">整理说明，不是时刻表。出发前请核对铁路、民航、客运和景区的官方信息。</p>`
+    : "";
+  const links = spot.links?.length
+    ? `<p class="official-links">${spot.links
+        .map((link) => `<a class="official-link" href="${esc(link.href)}" target="_blank" rel="noreferrer">${esc(link.label)}</a>`)
+        .join("")}</p><p class="fine">只放了能确认的官方或景区网站，用来自己核对开放和票务。没有把握的链接没有放。</p>`
+    : "";
+  const image = spot.image
+    ? `<figure class="spot-photo"><img src="${esc(spot.image.src)}" alt="${esc(spot.name)}" loading="lazy" /><figcaption>照片：${esc(spot.image.author)}，${esc(spot.image.license)}。<a href="${esc(spot.image.page)}" target="_blank" rel="noreferrer">维基共享资源原文件</a></figcaption></figure>`
+    : "";
+  const backLabel = state.browse ? "返回浏览列表" : "返回地区卡片";
   return `<article class="region-card spot-page">
-    <button type="button" class="text-btn" data-back-region>返回地区卡片</button>
+    <button type="button" class="text-btn" data-back-region>${backLabel}</button>
     <header class="card-head">
-      <p class="eyebrow">${esc(where)} · ${spot.kind === "custom" ? "习俗" : "景点"} · 整理介绍</p>
+      <p class="eyebrow">${esc(where)} · ${kindLabel} · 整理介绍</p>
       <h2 tabindex="-1">${esc(spot.name)}</h2>
     </header>
+    ${image}
     ${grade}
-    <h3>背景</h3>
+    ${links}
+    <h3>${historyTitle}</h3>
     <p>${esc(spot.history)}</p>
-    <h3>门票参考</h3>
+    <h3>${ticketTitle}</h3>
     <p>${esc(spot.tickets)}</p>
-    <p class="fine">票价、优惠和预约会变。上面若写了数字，只是整理时见到的公开参考，不是景区当日官价。出发前请在景区官方渠道核对。</p>
-    <h3>怎么逛</h3>
+    <p class="fine">若写了数字，只是整理时的公开参考，不是当日官价。出发前请在官方渠道核对。</p>
+    <h3>${visitTitle}</h3>
     <p>${esc(spot.visit)}</p>
+    ${access}
     ${season}
     ${caution}
   </article>`;
+}
+
+const BROWSE_LABELS: Record<string, string> = {
+  mountain: "看山",
+  heritage: "看古建",
+  festival: "看节庆",
+  spring: "春天",
+  summer: "夏天",
+  autumn: "秋天",
+  winter: "冬天",
+};
+
+function renderBrowse(): string {
+  if (!state.browse) return "";
+  const [mode, id] = state.browse.split(":") as ["theme" | "season", string];
+  const items = browseAttractions(mode, id).slice(0, 40);
+  const rows = items
+    .map((spot) => {
+      const where = spot.city ? `${fullName(spot.province)} · ${spot.city}` : fullName(spot.province);
+      return `<button type="button" class="browse-row" data-spot="${esc(spot.id)}" data-province="${esc(spot.province)}" data-city="${esc(spot.city ?? "")}">
+        <span>${esc(spot.name)}</span><small>${esc(where)}</small>
+      </button>`;
+    })
+    .join("");
+  return `<section class="browse-card">
+    <header class="card-head">
+      <p class="eyebrow">浏览 · 整理</p>
+      <h2>${esc(BROWSE_LABELS[id] ?? id)}</h2>
+      <p class="hint">只列出名称或季节说明对得上的条目，不是官方主题名录。点一条打开介绍。</p>
+    </header>
+    <div class="browse-list">${rows || `<p class="fine">这一类还没有收进清单。</p>`}</div>
+  </section>`;
 }
 
 function renderBars(rows: { name: string; share: number }[], tone: "surname" | "ethnic"): string {
@@ -674,7 +751,7 @@ function renderDetailSafe() {
     state.spot = null;
   }
   if (!state.province) {
-    detail.innerHTML = `
+    detail.innerHTML = `${state.browse ? renderBrowse() : ""}
       <article class="region-card">
         <header class="card-head">
           <p class="eyebrow">地区卡片</p>
@@ -705,7 +782,7 @@ function renderDetailSafe() {
     `;
     return;
   }
-  detail.innerHTML = regionColumn(state.province, state.city, state.cityPack, true);
+  detail.innerHTML = `${state.browse ? renderBrowse() : ""}${regionColumn(state.province, state.city, state.cityPack, true)}`;
 }
 
 function refresh() {
@@ -960,10 +1037,10 @@ async function showProvinceLevel() {
 const attractionsReady = fetch(`${import.meta.env.BASE_URL}data/attractions.json`)
   .then((response) => {
     if (!response.ok) throw new Error("景点介绍加载失败");
-    return response.json() as Promise<{ spots: Attraction[] }>;
+    return response.json() as Promise<{ spots: Attraction[]; hubs?: Record<string, string> }>;
   })
   .then((file) => {
-    setAttractions(file.spots);
+    setAttractions(file.spots, file.hubs ?? {});
   });
 
 async function restoreFromUrl() {
@@ -1009,11 +1086,12 @@ async function restoreFromUrl() {
       } else city = null;
       state.compare = { province: url.compareProvince, city, pack };
     }
+    if (url.browse && /^(theme|season):/.test(url.browse)) state.browse = url.browse;
     if (url.spot && state.province) {
       const spot = attractionById(url.spot);
       state.spot = spot && spot.province === state.province ? spot.id : null;
     }
-    if (narrowScreen() && (state.province || state.spot)) state.drawerOpen = true;
+    if (narrowScreen() && (state.province || state.spot || state.browse)) state.drawerOpen = true;
   } finally {
     silenceUrl = false;
   }
@@ -1210,10 +1288,31 @@ detail.addEventListener("click", (event) => {
   }
   const spotButton = target.closest<HTMLButtonElement>("[data-spot]");
   if (!spotButton?.dataset.spot) return;
-  state.spot = spotButton.dataset.spot;
+  const nextSpot = spotButton.dataset.spot;
+  const province = spotButton.dataset.province;
+  const city = spotButton.dataset.city ? spotButton.dataset.city : null;
+  state.spot = nextSpot;
+  if (province && isKnownProvince(province) && (province !== state.province || city !== state.city)) {
+    void goToPlace(province, city).then(() => {
+      state.spot = nextSpot;
+      openDrawerIfNarrow();
+      refresh();
+      focusDetail();
+    });
+    return;
+  }
   openDrawerIfNarrow();
   refresh();
   focusDetail();
+});
+
+document.querySelector("#browse")?.addEventListener("click", (event) => {
+  const button = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-browse]");
+  if (!button?.dataset.browse) return;
+  state.browse = state.browse === button.dataset.browse ? null : button.dataset.browse;
+  state.spot = null;
+  openDrawerIfNarrow();
+  refresh();
 });
 
 mountMap(chartEl, (name) => {

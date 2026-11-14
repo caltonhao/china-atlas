@@ -2,6 +2,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { catalog } from "./attractions/catalog.mjs";
+import { upgrades } from "./attractions/upgrades.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const culture = JSON.parse(readFileSync(join(root, "data/culture.json"), "utf8"));
@@ -205,6 +206,7 @@ function pushSpot(entry) {
 }
 
 for (const entry of catalog) pushSpot(entry);
+for (const entry of upgrades) pushSpot(entry);
 
 function cleanName(raw) {
   let name = raw.replace(LEADING, "");
@@ -259,7 +261,7 @@ function extractNames(text) {
   return names;
 }
 
-function addShort(province, city, name, kind, history) {
+function addShort(province, city, name, kind, sentence) {
   const id = `${province}-${name}`;
   if (idSet.has(id)) return;
   const owned = spots.some(
@@ -269,6 +271,23 @@ function addShort(province, city, name, kind, history) {
   );
   if (owned) return;
   idSet.add(id);
+  const place = city || province;
+  const localNote = name.endsWith("看点") ? sentence : `${sentence}这是${place}可以单独去看的一处，不是把全省名字合成一个景区。`;
+  let visit = `把「${name}」单独留出时间，按门口导览走完开放路线，不要只在路口看一眼名字。末班和开放范围以当日公告为准。`;
+  if (/山|峰|峡|岭|崖|长城/.test(name)) {
+    visit = `「${name}」按开放的山路、城墙或栈道走。索道若有，是另外计费的。第一次到主要观景点即可，不要临时加未开放的小路。留出半天更从容。`;
+  } else if (/寺|庙|宫|塔|庵|观/.test(name)) {
+    visit = `「${name}」按开放的殿宇顺序看。香火、功德和门票不是一回事。留一到两小时，殿内保持安静。`;
+  } else if (/博物馆|纪念馆/.test(name)) {
+    visit = `「${name}」以室内展陈为主，跟着展线看。很多馆周一或固定日闭馆，出发前先查公告。`;
+  } else if (/湖|江|海|岛|湾|瀑|泉/.test(name)) {
+    visit = `「${name}」看水和岸。游船、轮渡若有，通常和大门票分开。先留下返程时间。`;
+  } else if (/古城|古镇|街|园/.test(name)) {
+    visit = `「${name}」多半是街区、园子或镇子。主路和侧巷不一样，留两小时，早晚比中午安静。`;
+  }
+  if (name.endsWith("看点")) {
+    visit = "介绍里提到的几处不要塞进同一个小时。每处按门口导览走，开放范围以当日公告为准。";
+  }
   spots.push({
     id,
     name,
@@ -279,7 +298,7 @@ function addShort(province, city, name, kind, history) {
     kind,
     grade: null,
     depth: "short",
-    history,
+    history: localNote,
     tickets:
       kind === "custom"
         ? "这是节令或社区活动，一般没有景区式大门票。摊位和饮食另算。当年办不办、要不要预约，看主办方公告。"
@@ -287,7 +306,7 @@ function addShort(province, city, name, kind, history) {
     visit:
       kind === "custom"
         ? "时间对了才遇得上，平日去不一定看得到。跟着当地人的秩序看，不要挤进仪式队伍。"
-        : `「${name}」可以按介绍里的看点单独留出时间，不要只在路口看一眼名字。入口、步行方向和开放范围以景区当日导览为准。`,
+        : visit,
     season: CLIMATE[province] || "",
     caution: kind === "sight" ? cautionFor(name, province) : "节庆人多，看管好孩子和随身物品。",
   });
@@ -298,7 +317,7 @@ function addExtracted(province, city, text) {
   for (const name of extractNames(text)) {
     const history = relatedText(text, name);
     if (history.length < 12) continue;
-    addShort(province, city, name, "sight", `${history}更具体的沿革这里不展开，避免把传说写成定论。`);
+    addShort(province, city, name, "sight", history);
   }
 }
 
@@ -358,17 +377,199 @@ for (const [province, cities] of Object.entries(culture.cities)) {
   for (const [city, note] of Object.entries(cities)) ensureSight(province, city, note.sights);
 }
 
+const PRODUCTS = [
+  "烤鸭", "豆汁", "京剧", "狗不理", "麻花", "炸糕", "驴肉火烧", "老陈醋", "汾酒", "刀削面", "奶茶", "奶豆腐", "烤全羊",
+  "锅包肉", "酸菜", "冷面", "人参", "红肠", "小笼包", "生煎", "盐水鸭", "大闸蟹", "苏绣", "云锦", "龙井", "黄酒", "臭鳜鱼",
+  "宣纸", "徽墨", "佛跳墙", "沙茶面", "乌龙茶", "寿山石", "瓷器", "瓦罐汤", "煎饼", "阿胶", "热干面", "臭豆腐", "剁椒",
+  "肠粉", "早茶", "螺蛳粉", "桂林米粉", "过桥米线", "酥油茶", "青稞", "羊肉泡馍", "肉夹馍", "凉皮", "牛肉面", "酿皮",
+  "手抓羊肉", "馕", "葡萄干", "火锅", "豆花", "腊肉", "米粉", "椰子", "菠萝", "饵块", "枸杞", "青稞酒", "马头琴", "剪纸",
+  "漆器", "蜀绣", "蜡染", "扎染", "batik",
+];
+
+function addSpecialties(province, city, text) {
+  if (!text) return;
+  let added = 0;
+  for (const name of PRODUCTS) {
+    if (!text.includes(name) || added >= 3) continue;
+    const sentence = relatedText(text, name) || text;
+    const id = `${province}-${name}`;
+    if (idSet.has(id)) continue;
+    idSet.add(id);
+    added += 1;
+    spots.push({
+      id,
+      name,
+      aliases: [],
+      province,
+      city: city ?? null,
+      places: [{ province, city: city ?? null }],
+      kind: "specialty",
+      grade: null,
+      depth: "short",
+      history: `${sentence}这是当地能遇到的吃食或手艺，用来说明味道和做法，不是官方名录。`,
+      tickets: "这不是景区门票。馆子、作坊和商店各自标价，这里不写死价格。",
+      visit: `想尝或想看「${name}」，就到本地馆子、早市或作坊，问清是不是当季、是不是现场做的。旅游专柜上的礼盒和日常吃的不一定是同一种。`,
+      season: /春|夏|秋|冬|时令|上市/.test(sentence) ? sentence : CLIMATE[province] || "",
+      caution: "招牌和实物要对上。贵重工艺品看清是不是现场制作。",
+    });
+  }
+}
+for (const [province, note] of Object.entries(culture.provinces)) addSpecialties(province, null, note.specialties);
+for (const [province, cities] of Object.entries(culture.cities)) {
+  for (const [city, note] of Object.entries(cities)) addSpecialties(province, city, note.specialties);
+}
+
+const HUBS = {
+  北京: "高铁多在北京南、北京西、北京站，飞机在首都机场或大兴机场。市内再换乘地铁或公交。",
+  天津: "高铁常用天津站、天津西站，飞机在滨海机场。市内地铁能接到主要市区。",
+  河北: "进省多从石家庄站或各地级市高铁站，再转汽车进山。",
+  山西: "高铁多到太原南或各地市车站，再转汽车上山。",
+  内蒙古: "省会方向常用呼和浩特站和白塔机场，草原和沙漠景点还要再转长途车。",
+  辽宁: "沈阳、大连有高铁和机场，再转市内交通或汽车。",
+  吉林: "长春、吉林市有高铁，长白山方向还要从延边或白山转景区车。",
+  黑龙江: "哈尔滨站和太平机场是常见入口，再转高铁或汽车。",
+  上海: "高铁在虹桥站或上海站，飞机在浦东或虹桥机场，市内地铁密集。",
+  江苏: "南京南、苏州、无锡等站都有高铁，再转地铁或公交。",
+  浙江: "杭州东是常用高铁站，萧山机场在杭州，再转高铁或汽车到各市。",
+  安徽: "合肥站、黄山北等是常见高铁口，黄山还要再转景区交通。",
+  福建: "福州、厦门有高铁和机场，武夷山、土楼还要再转汽车。",
+  江西: "南昌西和各地市高铁站是入口，庐山、三清山要再上山。",
+  山东: "济南西、青岛等站有高铁，泰山从泰安站更近。",
+  河南: "郑州东是主要高铁枢纽，再转高铁或汽车到洛阳、开封等地。",
+  湖北: "武汉有高铁和天河机场，武当山、神农架、恩施还要再转。",
+  湖南: "长沙南是常用高铁站，张家界、凤凰还要再转火车或汽车。",
+  广东: "广州南、深圳北高铁很密，白云、宝安等机场后再转地铁或城际。",
+  广西: "南宁东、桂林有高铁和机场，漓江游船从桂林或阳朔码头走。",
+  海南: "飞机到海口美兰或三亚凤凰较常见，环岛有高铁，再转汽车。",
+  重庆: "重庆北、重庆西有高铁，江北机场进城后，山区景区还要再转汽车。",
+  四川: "成都东和双流、天府机场是常见入口，九寨沟、峨眉山要再转。",
+  贵州: "贵阳北和龙洞堡机场是入口，黄果树、西江还要再转汽车。",
+  云南: "昆明南和长水机场是入口，丽江、大理、香格里拉多再乘飞机或高铁。",
+  西藏: "多数人先飞拉萨贡嘎机场，或乘青藏铁路到拉萨站。进藏注意海拔。",
+  陕西: "西安北有高铁，咸阳机场进城后，华山从华山北站更近。",
+  甘肃: "兰州西是主要高铁站，敦煌、嘉峪关多再乘火车或飞机。",
+  青海: "西宁站和曹家堡机场是入口，青海湖还要再沿环湖公路走。",
+  宁夏: "银川站和河东机场是入口，沙坡头在中卫，沙湖在石嘴山方向。",
+  新疆: "乌鲁木齐站和地窝堡机场是常见入口，北疆南疆景点距离远，往往还要再飞或坐火车。",
+  香港: "高铁可到香港西九龙站，飞机在香港国际机场，市内靠地铁和渡轮。",
+  澳门: "常见是从横琴或珠海口岸入境，澳门国际机场也可飞。市内距离短。",
+  台湾: "高铁沿西部城市停靠，桃园机场在台北附近。东部和山区要再转火车或汽车。",
+};
+
+function inferThemes(spot) {
+  if (spot.name.endsWith("看点")) return [];
+  const themes = [];
+  if (spot.kind === "custom") themes.push("festival");
+  if (spot.kind === "sight" && /山|峰|岳|峡|岭|崖|长城|雪山/.test(spot.name)) themes.push("mountain");
+  if (spot.kind === "sight" && /寺|庙|塔|陵|古城|古镇|石窟|长城|府|阁|园林|牌坊|故居|博物馆|宫|楼|园/.test(spot.name)) themes.push("heritage");
+  return themes;
+}
+
+function inferSeasons(text) {
+  const seasons = new Set();
+  if (/全年/.test(text)) ["spring", "summer", "autumn", "winter"].forEach((item) => seasons.add(item));
+  if (/春|三月|四月|清明|花/.test(text)) seasons.add("spring");
+  if (/夏|六月|七月|八月|避暑/.test(text)) seasons.add("summer");
+  if (/秋|九月|十月|彩林|候鸟/.test(text)) seasons.add("autumn");
+  if (/冬|冰雪|雾凇|结冰|腊月/.test(text)) seasons.add("winter");
+  return [...seasons];
+}
+
+function accessFor(spot) {
+  if (spot.kind === "specialty") return "在当地馆子、早市或作坊就能遇到，不必当成景区大门来找。价格各家不同。";
+  if (spot.province === "海南" && (spot.name.includes("三沙") || spot.name.includes("永兴"))) {
+    return "三沙没有可以自由购票的高铁或民航机场。岛上往来靠规定航线和补给船，不是景区班车。这里不编造船期。";
+  }
+  if (/图木舒克|阿拉尔|铁门关|可克达拉|昆玉|胡杨河|双河|北屯|五家渠|石河子/.test(spot.city || spot.name)) {
+    return "这些兵团城镇多从乌鲁木齐或邻近地州中转，班次不固定。这里不编造时刻和票价。";
+  }
+  const hub = HUBS[spot.province];
+  if (!hub) return "";
+  const local = spot.city ? `先到${spot.city}。` : `先到${spot.province}。`;
+  return `${local}${hub}景区里的区间车、索道或游船以当日公告为准，这里不列班次和票价。`;
+}
+
+const LINKS = {
+  "北京-故宫": [
+    { label: "官方网站", href: "https://www.dpm.org.cn/" },
+    { label: "预约入口", href: "https://ticket.dpm.org.cn/" },
+  ],
+  "陕西-秦始皇兵马俑": [{ label: "官方网站", href: "https://www.bmy.com.cn/" }],
+  "甘肃-莫高窟": [{ label: "官方网站", href: "https://www.dha.ac.cn/" }],
+  "四川-九寨沟": [{ label: "官方网站", href: "https://www.jiuzhai.com/" }],
+  "安徽-黄山": [{ label: "景区网站", href: "https://www.huangshan.com.cn/" }],
+  "香港-维多利亚港": [{ label: "官方旅游资讯", href: "https://www.discoverhongkong.com/" }],
+  "香港-太平山": [{ label: "官方旅游资讯", href: "https://www.discoverhongkong.com/" }],
+  "澳门-大三巴": [{ label: "官方旅游资讯", href: "https://www.macaotourism.gov.mo/" }],
+  "澳门-妈阁庙": [{ label: "官方旅游资讯", href: "https://www.macaotourism.gov.mo/" }],
+  "台湾-日月潭": [{ label: "官方观光资讯", href: "https://www.taiwan.net.tw/" }],
+  "台湾-阿里山": [{ label: "官方观光资讯", href: "https://www.taiwan.net.tw/" }],
+  "台湾-台北101": [{ label: "官方观光资讯", href: "https://www.taiwan.net.tw/" }],
+};
+
+const IMAGES = {
+  "北京-故宫": {
+    src: "https://upload.wikimedia.org/wikipedia/commons/thumb/2/2c/Beijing_China_Forbidden-City-07.jpg/960px-Beijing_China_Forbidden-City-07.jpg",
+    page: "https://commons.wikimedia.org/wiki/File:Beijing_China_Forbidden-City-07.jpg",
+    author: "CEphoto, Uwe Aranas",
+    license: "CC BY-SA 3.0",
+  },
+  "北京-八达岭长城": {
+    src: "https://upload.wikimedia.org/wikipedia/commons/thumb/5/50/Badaling_China_Great-Wall-of-China-01.jpg/960px-Badaling_China_Great-Wall-of-China-01.jpg",
+    page: "https://commons.wikimedia.org/wiki/File:Badaling_China_Great-Wall-of-China-01.jpg",
+    author: "CEphoto, Uwe Aranas",
+    license: "CC BY-SA 3.0",
+  },
+  "浙江-西湖": {
+    src: "https://upload.wikimedia.org/wikipedia/commons/thumb/0/07/20090524_Hangzhou_West_Lake_7531.jpg/960px-20090524_Hangzhou_West_Lake_7531.jpg",
+    page: "https://commons.wikimedia.org/wiki/File:20090524_Hangzhou_West_Lake_7531.jpg",
+    author: "Jakub Hałun",
+    license: "CC BY-SA 3.0",
+  },
+  "安徽-黄山": {
+    src: "https://upload.wikimedia.org/wikipedia/commons/thumb/d/d6/Huangshan%2C_September_2018_26.jpg/960px-Huangshan%2C_September_2018_26.jpg",
+    page: "https://commons.wikimedia.org/wiki/File:Huangshan,_September_2018_26.jpg",
+    author: "De-Shao Liu",
+    license: "CC BY-SA 4.0",
+  },
+  "陕西-秦始皇兵马俑": {
+    src: "https://upload.wikimedia.org/wikipedia/commons/thumb/5/56/Qin_Terracotta_Army%2C_Pit_1_01.jpg/960px-Qin_Terracotta_Army%2C_Pit_1_01.jpg",
+    page: "https://commons.wikimedia.org/wiki/File:Qin_Terracotta_Army,_Pit_1_01.jpg",
+    author: "Gary Lee Todd",
+    license: "CC0",
+  },
+  "广西-漓江": {
+    src: "https://upload.wikimedia.org/wikipedia/commons/thumb/9/92/1_li_jiang_guilin_yangshuo_2011.jpg/960px-1_li_jiang_guilin_yangshuo_2011.jpg",
+    page: "https://commons.wikimedia.org/wiki/File:1_li_jiang_guilin_yangshuo_2011.jpg",
+    author: "chensiyuan",
+    license: "CC BY-SA 4.0",
+  },
+};
+
+for (const spot of spots) {
+  spot.themes = inferThemes(spot);
+  spot.seasons = inferSeasons(`${spot.season || ""}${spot.history || ""}`);
+  spot.access = accessFor(spot);
+  if (LINKS[spot.id]) spot.links = LINKS[spot.id];
+  if (IMAGES[spot.id]) spot.image = IMAGES[spot.id];
+}
+
 const file = {
   meta: {
     label: "整理介绍",
-    note: "景区和节令条目据公开常识编写，不是文化和旅游部门名录。国家A级只在有把握时标注，并可能调整。票价若出现数字，只是整理时的公开参考，不是当日官价。",
+    note: "景区、节令和特色据公开常识编写，不是文化和旅游部门名录。国家A级只在有把握时标注，并可能调整。票价若出现数字，只是整理时的公开参考，不是当日官价。交通是整理说明，不是时刻表。",
   },
+  hubs: HUBS,
   spots,
 };
 
 writeFileSync(join(root, "public/data/attractions.json"), JSON.stringify(file));
 const full = spots.filter((spot) => spot.depth === "full");
 const graded = full.filter((spot) => spot.grade);
+const customs = spots.filter((spot) => spot.kind === "custom").length;
+const specialties = spots.filter((spot) => spot.kind === "specialty").length;
+const links = spots.filter((spot) => spot.links?.length).length;
+const images = spots.filter((spot) => spot.image).length;
 console.log(
-  `attractions ${spots.length}, full ${full.length}, graded ${graded.length}, 5A ${graded.filter((spot) => spot.grade === "5A").length}, 4A ${graded.filter((spot) => spot.grade === "4A").length}`,
+  `attractions ${spots.length}, full ${full.length}, short ${spots.length - full.length}, custom ${customs}, specialty ${specialties}, links ${links}, images ${images}, 5A ${graded.filter((spot) => spot.grade === "5A").length}, 4A ${graded.filter((spot) => spot.grade === "4A").length}`,
 );
