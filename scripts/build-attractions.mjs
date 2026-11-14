@@ -550,6 +550,8 @@ const LINKS = {
   "广西-漓江": [{ label: "景区网站", href: "https://www.lijiangriver.com/" }],
   "重庆-武隆喀斯特": [{ label: "景区网站", href: "http://www.wlkst.com/" }],
   "安徽-天柱山": [{ label: "景区网站", href: "http://www.tzs.com.cn/" }],
+  "广东-丹霞山": [{ label: "景区网站", href: "https://dxs.sg.gov.cn/" }],
+  "辽宁-本溪水洞": [{ label: "景区网站", href: "https://www.lnbenxishuidong.com/" }],
   "黑龙江-虎头旅游景区": [{ label: "政府名录", href: "https://www.jixi.gov.cn/jixi/c101258/common_list.shtml" }],
   "黑龙江-当壁镇兴凯湖旅游度假区": [{ label: "政府名录", href: "https://www.jixi.gov.cn/jixi/c101258/common_list.shtml" }],
   "黑龙江-兴凯湖新开流景区": [{ label: "政府名录", href: "https://www.jixi.gov.cn/jixi/c101258/common_list.shtml" }],
