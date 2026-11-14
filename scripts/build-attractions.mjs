@@ -202,6 +202,9 @@ function pushSpot(entry) {
     visit: entry.visit,
     season: entry.season || CLIMATE[entry.province] || "",
     caution: entry.caution || "",
+    themes: entry.themes === undefined ? null : entry.themes,
+    seasons: entry.seasons === undefined ? null : entry.seasons,
+    access: entry.access || "",
   });
 }
 
@@ -251,7 +254,7 @@ function extractNames(text) {
     raw = raw.split(/的|是|在|和|与|沿|从|有|能|还|不|就|把|被|这|那|看|要|着|或|再|到|走|进|连/).pop() ?? "";
     const name = cleanName(raw);
     if (!name.endsWith(suffix) || name.length < Math.max(3, suffix.length + 1) || name.length > 12) continue;
-    if (/^(两段|清入|明清皇|明代园|高山|山坡|城市公园|入湿地|大瀑布|明长城|后三宫|红石山)/.test(name)) continue;
+    if (/^(两段|清入|明清皇|明代园|高山|山坡|城市公园|入湿地|大瀑布|明长城|后三宫|红石山|中俄界湖|内陆湖)/.test(name)) continue;
     if (/特|凝|爬|教|写|学|校|砾|咸|村寨|进峡|写字|教学|主题|校园|行政|部分|纪念|地宫|进山|海峡|皇家|大楼|高楼|堰塞|看|要|走|坐|进入|连着|顺着|再进|上山|下山/.test(name)) continue;
     if (seen.has(name)) continue;
     seen.add(name);
@@ -264,11 +267,11 @@ function extractNames(text) {
 function addShort(province, city, name, kind, sentence) {
   const id = `${province}-${name}`;
   if (idSet.has(id)) return;
-  const owned = spots.some(
-    (spot) =>
-      spot.province === province &&
-      (spot.name === name || spot.aliases.includes(name) || name.includes(spot.name) || spot.name.includes(name)),
-  );
+  const owned = spots.some((spot) => {
+    if (spot.province !== province) return false;
+    const names = [spot.name, ...(spot.aliases || [])];
+    return names.some((known) => known === name || name.includes(known) || known.includes(name));
+  });
   if (owned) return;
   idSet.add(id);
   const place = city || province;
@@ -516,6 +519,9 @@ const LINKS = {
   "四川-四川博物院": [{ label: "官方网站", href: "https://www.scmuseum.cn/" }],
   "云南-云南省博物馆": [{ label: "官方网站", href: "https://www.ynmuseum.org/" }],
   "陕西-陕西历史博物馆": [{ label: "官方网站", href: "https://www.sxhm.com/" }],
+  "黑龙江-虎头旅游景区": [{ label: "政府名录", href: "https://www.jixi.gov.cn/jixi/c101258/common_list.shtml" }],
+  "黑龙江-当壁镇兴凯湖旅游度假区": [{ label: "政府名录", href: "https://www.jixi.gov.cn/jixi/c101258/common_list.shtml" }],
+  "黑龙江-兴凯湖新开流景区": [{ label: "政府名录", href: "https://www.jixi.gov.cn/jixi/c101258/common_list.shtml" }],
   "香港-维多利亚港": [{ label: "官方旅游资讯", href: "https://www.discoverhongkong.com/" }],
   "香港-太平山": [{ label: "官方旅游资讯", href: "https://www.discoverhongkong.com/" }],
   "澳门-大三巴": [{ label: "官方旅游资讯", href: "https://www.macaotourism.gov.mo/" }],
@@ -652,6 +658,18 @@ const IMAGES = {
     author: "WaitinZ",
     license: "CC BY-SA 3.0",
   },
+  "黑龙江-虎头旅游景区": {
+    src: "https://upload.wikimedia.org/wikipedia/commons/thumb/f/f8/%E4%BE%B5%E5%8D%8E%E6%97%A5%E5%86%9B%E8%99%8E%E5%A4%B4%E8%A6%81%E5%A1%9E%E5%8D%9A%E7%89%A9%E9%A6%86_10.jpg/960px-%E4%BE%B5%E5%8D%8E%E6%97%A5%E5%86%9B%E8%99%8E%E5%A4%B4%E8%A6%81%E5%A1%9E%E5%8D%9A%E7%89%A9%E9%A6%86_10.jpg",
+    page: "https://commons.wikimedia.org/wiki/File:%E4%BE%B5%E5%8D%8E%E6%97%A5%E5%86%9B%E8%99%8E%E5%A4%B4%E8%A6%81%E5%A1%9E%E5%8D%9A%E7%89%A9%E9%A6%86_10.jpg",
+    author: "호고호",
+    license: "CC0",
+  },
+  "黑龙江-当壁镇兴凯湖旅游度假区": {
+    src: "https://upload.wikimedia.org/wikipedia/commons/thumb/d/da/Lake_Khanka_Landsat_7_2001-09-25.jpg/960px-Lake_Khanka_Landsat_7_2001-09-25.jpg",
+    page: "https://commons.wikimedia.org/wiki/File:Lake_Khanka_Landsat_7_2001-09-25.jpg",
+    author: "Jesse Allen",
+    license: "Public domain",
+  },
   "四川-乐山大佛": {
     src: "https://upload.wikimedia.org/wikipedia/commons/thumb/4/4b/Leshan_Giant_Buddha%2C_20161102.jpg/960px-Leshan_Giant_Buddha%2C_20161102.jpg",
     page: "https://commons.wikimedia.org/wiki/File:Leshan_Giant_Buddha,_20161102.jpg",
@@ -661,9 +679,9 @@ const IMAGES = {
 };
 
 for (const spot of spots) {
-  spot.themes = inferThemes(spot);
-  spot.seasons = inferSeasons(`${spot.season || ""}${spot.history || ""}`);
-  spot.access = accessFor(spot);
+  if (spot.themes == null) spot.themes = inferThemes(spot);
+  if (spot.seasons == null) spot.seasons = inferSeasons(`${spot.season || ""}${spot.history || ""}`);
+  if (!spot.access) spot.access = accessFor(spot);
   if (LINKS[spot.id]) spot.links = LINKS[spot.id];
   if (IMAGES[spot.id]) spot.image = IMAGES[spot.id];
 }
