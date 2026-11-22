@@ -561,6 +561,8 @@ const LINKS = {
   "福建-三坊七巷": [{ label: "景区网站", href: "https://www.fzsfqx.com.cn/" }],
   "云南-崇圣寺三塔": [{ label: "景区网站", href: "https://www.dalisanta.com/" }],
   "湖南-韶山": [{ label: "纪念馆网站", href: "https://www.ssmzd.com/" }],
+  "重庆-大足石刻": [{ label: "研究院网站", href: "https://www.dzskyjy.cn/" }],
+  "云南-石林": [{ label: "景区网站", href: "http://www.shilin.com.cn/" }],
   "黑龙江-虎头旅游景区": [{ label: "政府名录", href: "https://www.jixi.gov.cn/jixi/c101258/common_list.shtml" }],
   "黑龙江-当壁镇兴凯湖旅游度假区": [{ label: "政府名录", href: "https://www.jixi.gov.cn/jixi/c101258/common_list.shtml" }],
   "黑龙江-兴凯湖新开流景区": [{ label: "政府名录", href: "https://www.jixi.gov.cn/jixi/c101258/common_list.shtml" }],
