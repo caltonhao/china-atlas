@@ -555,6 +555,7 @@ const LINKS = {
   "山西-乔家大院": [{ label: "景区网站", href: "https://qjdyzxw.jingqu.cn/" }],
   "山西-五台山": [{ label: "游客服务中心", href: "https://www.wtsykfwzx.com/index.aspx" }],
   "广西-德天瀑布": [{ label: "景区网站", href: "https://ctgdetian.com/" }],
+  "山西-恒山": [{ label: "景区网站", href: "https://www.byhs.net.cn/" }],
   "黑龙江-虎头旅游景区": [{ label: "政府名录", href: "https://www.jixi.gov.cn/jixi/c101258/common_list.shtml" }],
   "黑龙江-当壁镇兴凯湖旅游度假区": [{ label: "政府名录", href: "https://www.jixi.gov.cn/jixi/c101258/common_list.shtml" }],
   "黑龙江-兴凯湖新开流景区": [{ label: "政府名录", href: "https://www.jixi.gov.cn/jixi/c101258/common_list.shtml" }],
